@@ -9,14 +9,14 @@ import {
   updateAppointmentStatus,
 } from '../controllers/appointments.controller.js';
 
-const router = Router();
+const appointmentsRouter = Router();
 
-router.get('/available-slots', getAvailableSlots);
-router.post('/', createAppointment);
-router.get('/', getAppointments);
-router.get('/:id', getAppointmentById);
-router.put('/:id', updateAppointment);
-router.delete('/:id', cancelAppointment);
-router.patch('/:id/status', updateAppointmentStatus);
+appointmentsRouter.get('/available-slots', getAvailableSlots);
+appointmentsRouter.post('/', createAppointment);
+appointmentsRouter.get('/', getAppointments);
+appointmentsRouter.get('/:id', getAppointmentById);
+appointmentsRouter.put('/:id', updateAppointment);
+appointmentsRouter.delete('/:id', cancelAppointment);
+appointmentsRouter.patch('/:id/status', updateAppointmentStatus);
 
-export default router;
+export default appointmentsRouter;
