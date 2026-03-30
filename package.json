@@ -1,0 +1,12 @@
+{
+  "name": "auto-pro-tech-api",
+  "version": "1.0.0",
+  "description": "Core business logic of Auto Pro Tech",
+  "license": "ISC",
+  "author": "Jimwell Ibay",
+  "type": "module",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
+}
