@@ -2,12 +2,14 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import { createServer } from 'http';
 
 import { errorHandler } from './middlewares/errorHandler.js';
 import { notFound } from './middlewares/notFound.js';
 import { PORT, NODE_ENV } from './config/env.js';
 import router from './routes/index.js';
 import { pool } from './database/drizzle.js';
+import { initWebsocket } from './websocket.js';
 
 const app = express();
 
@@ -30,7 +32,10 @@ const startServer = async () => {
     await pool.query('SELECT 1');
     console.log('Database: Connected');
 
-    app.listen(PORT, () => {
+    const server = createServer(app);
+    initWebsocket(server);
+
+    server.listen(PORT, () => {
       console.log(`App is running on PORT ${PORT}`);
     });
   } catch (error) {

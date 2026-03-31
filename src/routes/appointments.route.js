@@ -6,11 +6,14 @@ import {
   getAppointmentById,
   updateAppointment,
   cancelAppointment,
-  updateAppointmentStatus,
-  getAppointmentStatusLog,
   getCustomerAppointments,
   getCalendarView,
 } from '../controllers/appointments.controller.js';
+import {
+  patchAppointmentStatus,
+  getAppointmentStatusLog,
+  getTrackingAppointments,
+} from '../controllers/statusTracking.controller.js';
 
 const appointmentsRouter = Router();
 
@@ -26,7 +29,10 @@ appointmentsRouter.put('/:id', updateAppointment);
 appointmentsRouter.delete('/:id', cancelAppointment);
 
 // Status management
-appointmentsRouter.patch('/:id/status', updateAppointmentStatus);
+appointmentsRouter.patch('/:id/status', patchAppointmentStatus);
 appointmentsRouter.get('/:id/status-log', getAppointmentStatusLog);
+
+// Optional staff dashboard
+appointmentsRouter.get('/tracking', getTrackingAppointments);
 
 export default appointmentsRouter;
