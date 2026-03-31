@@ -80,7 +80,7 @@ export const createServiceType = async (req, res, next) => {
 export const updateServiceType = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { name, description, basePrice, durationMinutes, isActive } = req.body;
+    const { name, description, basePrice, durationMinutes, active } = req.body;
 
     // Check if service type exists
     const [existing] = await Database.select()
@@ -119,7 +119,7 @@ export const updateServiceType = async (req, res, next) => {
     if (description !== undefined) updateData.description = description;
     if (basePrice !== undefined) updateData.basePrice = basePrice;
     if (durationMinutes !== undefined) updateData.durationMinutes = durationMinutes;
-    if (isActive !== undefined) updateData.isActive = isActive;
+    if (active !== undefined) updateData.active = active;
 
     const [updated] = await Database.update(ServiceTypes)
       .set(updateData)

@@ -105,7 +105,7 @@ export const getAvailableSlots = async (req, res, next) => {
       });
     }
 
-    if (!serviceType.isActive) {
+    if (!serviceType.active) {
       return res.status(400).json({
         success: false,
         message: 'Service type is not active',
@@ -207,7 +207,7 @@ export const createAppointment = async (req, res, next) => {
       });
     }
 
-    if (!serviceType.isActive) {
+    if (!serviceType.active) {
       return res.status(400).json({
         success: false,
         message: 'Service type is not active',
@@ -403,7 +403,7 @@ export const updateAppointment = async (req, res, next) => {
           message: 'Service type not found',
         });
       }
-      if (!newService.isActive) {
+      if (!newService.active) {
         return res.status(400).json({
           success: false,
           message: 'Service type is not active',
