@@ -2,8 +2,8 @@
 export * from './enums/appointment-status.enum.js';
 
 // models
-export { Customers } from './customers.model.js';
-export { Vehicles } from './vehicles.model.js';
-export { Staff } from './staff.model.js';
-export { ServiceTypes } from './service-types.model.js';
-export { Appointments } from './appointments.model.js';
+export * from './customers.model.js';
+export * from './vehicles.model.js';
+export * from './staff.model.js';
+export * from './service-types.model.js';
+export * from './appointments.model.js';
