@@ -1,0 +1,28 @@
+### Create Customer
+POST http://localhost:4000/api/v1/customers/
+Content-Type: application/json
+
+{
+  "fullName": "John Doe",
+  "email": "john.doe@example.com",
+  "phone": "123-456-7890"
+}
+
+### Get All Customers
+GET http://localhost:4000/api/v1/customers/
+
+### Get Customer by ID
+GET http://localhost:4000/api/v1/customers/123e4567-e89b-12d3-a456-426614174000
+
+### Get Customer Appointments
+GET http://localhost:4000/api/v1/customers/123e4567-e89b-12d3-a456-426614174000/appointments
+
+### Update Customer
+PUT http://localhost:4000/api/v1/customers/123e4567-e89b-12d3-a456-426614174000
+Content-Type: application/json
+
+{
+  "fullName": "John Doe Updated",
+  "email": "john.doe.updated@example.com",
+  "phone": "123-456-7891"
+}

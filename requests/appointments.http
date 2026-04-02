@@ -1,0 +1,60 @@
+### Get Available Slots
+GET http://localhost:4000/api/v1/appointments/available-slots?date=2023-10-01&serviceTypeId=123e4567-e89b-12d3-a456-426614174000
+
+### Get Calendar View
+GET http://localhost:4000/api/v1/appointments/calendar
+
+### Create Appointment
+POST http://localhost:4000/api/v1/appointments/
+Content-Type: application/json
+
+{
+  "customerId": "123e4567-e89b-12d3-a456-426614174000",
+  "vehicleId": "123e4567-e89b-12d3-a456-426614174001",
+  "serviceTypeId": "123e4567-e89b-12d3-a456-426614174002",
+  "appointmentDate": "2023-10-01",
+  "appointmentTime": "10:00:00",
+  "notes": "Regular maintenance",
+  "assignedStaffId": "123e4567-e89b-12d3-a456-426614174003"
+}
+
+### Get All Appointments
+GET http://localhost:4000/api/v1/appointments/
+
+### Get Appointment by ID
+GET http://localhost:4000/api/v1/appointments/123e4567-e89b-12d3-a456-426614174000
+
+### Update Appointment
+PUT http://localhost:4000/api/v1/appointments/123e4567-e89b-12d3-a456-426614174000
+Content-Type: application/json
+
+{
+  "customerId": "123e4567-e89b-12d3-a456-426614174000",
+  "vehicleId": "123e4567-e89b-12d3-a456-426614174001",
+  "serviceTypeId": "123e4567-e89b-12d3-a456-426614174002",
+  "appointmentDate": "2023-10-02",
+  "appointmentTime": "11:00:00",
+  "notes": "Updated maintenance",
+  "assignedStaffId": "123e4567-e89b-12d3-a456-426614174003"
+}
+
+### Cancel Appointment
+DELETE http://localhost:4000/api/v1/appointments/123e4567-e89b-12d3-a456-426614174000
+
+### Update Appointment Status
+PATCH http://localhost:4000/api/v1/appointments/123e4567-e89b-12d3-a456-426614174000/status
+Content-Type: application/json
+
+{
+  "status": "CONFIRMED",
+  "notes": "Appointment confirmed",
+  "changedByStaffId": "123e4567-e89b-12d3-a456-426614174003",
+  "invoiceAmount": 50.00,
+  "invoiceDetails": "Oil change service"
+}
+
+### Get Appointment Status Log
+GET http://localhost:4000/api/v1/appointments/123e4567-e89b-12d3-a456-426614174000/status-log
+
+### Get Tracking Appointments
+GET http://localhost:4000/api/v1/appointments/tracking?status=PENDING

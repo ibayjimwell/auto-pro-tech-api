@@ -1,0 +1,17 @@
+### Update Appointment Status
+PATCH http://localhost:4000/api/v1/appointments/123e4567-e89b-12d3-a456-426614174000/status
+Content-Type: application/json
+
+{
+  "status": "CONFIRMED",
+  "notes": "Appointment confirmed",
+  "changedByStaffId": "123e4567-e89b-12d3-a456-426614174003",
+  "invoiceAmount": 50.00,
+  "invoiceDetails": "Oil change service"
+}
+
+### Get Appointment Status Log
+GET http://localhost:4000/api/v1/appointments/123e4567-e89b-12d3-a456-426614174000/status-log
+
+### Get Tracking Appointments by Status
+GET http://localhost:4000/api/v1/appointments/tracking?status=PENDING

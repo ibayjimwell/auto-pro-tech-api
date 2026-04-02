@@ -1,0 +1,38 @@
+### Create Invoice
+POST http://localhost:4000/api/v1/invoices/
+Content-Type: application/json
+
+{
+  "appointmentId": "123e4567-e89b-12d3-a456-426614174000",
+  "invoiceType": "ESTIMATE",
+  "status": "PENDING_APPROVAL",
+  "totalAmount": 150.00,
+  "details": "Oil change and tire rotation",
+  "issuedByStaffId": "123e4567-e89b-12d3-a456-426614174001"
+}
+
+### Get All Invoices
+GET http://localhost:4000/api/v1/invoices/
+
+### Get Invoices by Status
+GET http://localhost:4000/api/v1/invoices/?status=PENDING_APPROVAL
+
+### Get Invoice by ID
+GET http://localhost:4000/api/v1/invoices/123e4567-e89b-12d3-a456-426614174000
+
+### Get Invoices by Appointment
+GET http://localhost:4000/api/v1/invoices/appointment/123e4567-e89b-12d3-a456-426614174000
+
+### Update Invoice
+PUT http://localhost:4000/api/v1/invoices/123e4567-e89b-12d3-a456-426614174000
+Content-Type: application/json
+
+{
+  "status": "APPROVED",
+  "totalAmount": 160.00,
+  "details": "Updated service details",
+  "approvedAt": "2023-10-01T10:00:00Z"
+}
+
+### Delete Invoice
+DELETE http://localhost:4000/api/v1/invoices/123e4567-e89b-12d3-a456-426614174000

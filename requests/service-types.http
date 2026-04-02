@@ -1,0 +1,27 @@
+### Get All Service Types
+GET http://localhost:4000/api/v1/service-types/
+
+### Create Service Type
+POST http://localhost:4000/api/v1/service-types/
+Content-Type: application/json
+
+{
+  "name": "Oil Change",
+  "description": "Regular oil change service",
+  "basePrice": 50.00,
+  "durationMinutes": 30
+}
+
+### Get Service Type by ID
+GET http://localhost:4000/api/v1/service-types/123e4567-e89b-12d3-a456-426614174000
+
+### Update Service Type
+PUT http://localhost:4000/api/v1/service-types/123e4567-e89b-12d3-a456-426614174000
+Content-Type: application/json
+
+{
+  "name": "Oil Change Updated",
+  "description": "Updated oil change service",
+  "basePrice": 55.00,
+  "durationMinutes": 35
+}

@@ -1,0 +1,33 @@
+### Create Staff
+POST http://localhost:4000/api/v1/staff/
+Content-Type: application/json
+
+{
+  "fullName": "John Doe",
+  "email": "john.doe@staff.com",
+  "role": "Mechanic",
+  "active": true
+}
+
+### Get All Staff
+GET http://localhost:4000/api/v1/staff/
+
+### Get Staff with Search
+GET http://localhost:4000/api/v1/staff/?search=john&active=true
+
+### Get Staff by ID
+GET http://localhost:4000/api/v1/staff/123e4567-e89b-12d3-a456-426614174000
+
+### Update Staff
+PUT http://localhost:4000/api/v1/staff/123e4567-e89b-12d3-a456-426614174000
+Content-Type: application/json
+
+{
+  "fullName": "John Doe Updated",
+  "email": "john.doe.updated@staff.com",
+  "role": "Senior Mechanic",
+  "active": true
+}
+
+### Delete Staff
+DELETE http://localhost:4000/api/v1/staff/123e4567-e89b-12d3-a456-426614174000
