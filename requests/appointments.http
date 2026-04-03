@@ -1,5 +1,5 @@
 ### Get Available Slots
-GET http://localhost:4000/api/v1/appointments/available-slots?date=2023-10-01&serviceTypeId=123e4567-e89b-12d3-a456-426614174000
+GET http://localhost:4000/api/v1/appointments/available-slots?date=2023-10-01&serviceTypeId=cb986fdf-fb77-4a67-9001-6c303b364129
 
 ### Get Calendar View
 GET http://localhost:4000/api/v1/appointments/calendar
@@ -9,52 +9,52 @@ POST http://localhost:4000/api/v1/appointments/
 Content-Type: application/json
 
 {
-  "customerId": "123e4567-e89b-12d3-a456-426614174000",
-  "vehicleId": "123e4567-e89b-12d3-a456-426614174001",
-  "serviceTypeId": "123e4567-e89b-12d3-a456-426614174002",
-  "appointmentDate": "2023-10-01",
+  "customerId": "f1365b8e-b091-4efd-897e-64a1382e17ca",
+  "vehicleId": "2bc33d8f-a698-49d1-9b8e-883f39cb8cb8",
+  "serviceTypeId": "cb986fdf-fb77-4a67-9001-6c303b364129",
+  "appointmentDate": "2026-04-04",
   "appointmentTime": "10:00:00",
   "notes": "Regular maintenance",
-  "assignedStaffId": "123e4567-e89b-12d3-a456-426614174003"
+  "assignedStaffId": "3b7d25be-1886-43d7-b238-822cb448ff63"
 }
 
 ### Get All Appointments
 GET http://localhost:4000/api/v1/appointments/
 
 ### Get Appointment by ID
-GET http://localhost:4000/api/v1/appointments/123e4567-e89b-12d3-a456-426614174000
+GET http://localhost:4000/api/v1/appointments/6e3bc817-f492-4d9f-a842-28d4399e0143
 
 ### Update Appointment
-PUT http://localhost:4000/api/v1/appointments/123e4567-e89b-12d3-a456-426614174000
+PUT http://localhost:4000/api/v1/appointments/6e3bc817-f492-4d9f-a842-28d4399e0143
 Content-Type: application/json
 
 {
-  "customerId": "123e4567-e89b-12d3-a456-426614174000",
-  "vehicleId": "123e4567-e89b-12d3-a456-426614174001",
-  "serviceTypeId": "123e4567-e89b-12d3-a456-426614174002",
-  "appointmentDate": "2023-10-02",
+  "customerId": "f1365b8e-b091-4efd-897e-64a1382e17ca",
+  "vehicleId": "2bc33d8f-a698-49d1-9b8e-883f39cb8cb8",
+  "serviceTypeId": "cb986fdf-fb77-4a67-9001-6c303b364129",
+  "appointmentDate": "2026-04-04",
   "appointmentTime": "11:00:00",
-  "notes": "Updated maintenance",
-  "assignedStaffId": "123e4567-e89b-12d3-a456-426614174003"
+  "notes": "Regular maintenance & Oil change",
+  "assignedStaffId": "3b7d25be-1886-43d7-b238-822cb448ff63"
 }
 
 ### Cancel Appointment
 DELETE http://localhost:4000/api/v1/appointments/123e4567-e89b-12d3-a456-426614174000
 
 ### Update Appointment Status
-PATCH http://localhost:4000/api/v1/appointments/123e4567-e89b-12d3-a456-426614174000/status
+PATCH http://localhost:4000/api/v1/appointments/6e3bc817-f492-4d9f-a842-28d4399e0143/status
 Content-Type: application/json
 
 {
   "status": "CONFIRMED",
   "notes": "Appointment confirmed",
-  "changedByStaffId": "123e4567-e89b-12d3-a456-426614174003",
+  "changedByStaffId": "3b7d25be-1886-43d7-b238-822cb448ff63",
   "invoiceAmount": 50.00,
   "invoiceDetails": "Oil change service"
 }
 
 ### Get Appointment Status Log
-GET http://localhost:4000/api/v1/appointments/123e4567-e89b-12d3-a456-426614174000/status-log
+GET http://localhost:4000/api/v1/appointments/6e3bc817-f492-4d9f-a842-28d4399e0143/status-log
 
 ### Get Tracking Appointments
 GET http://localhost:4000/api/v1/appointments/tracking?status=PENDING

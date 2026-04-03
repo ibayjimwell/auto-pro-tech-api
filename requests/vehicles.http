@@ -3,24 +3,24 @@ POST http://localhost:4000/api/v1/vehicles/
 Content-Type: application/json
 
 {
-  "customerId": "123e4567-e89b-12d3-a456-426614174000",
-  "plateNumber": "ABC-123",
-  "make": "Toyota",
-  "model": "Camry",
-  "year": 2020
+  "customerId": "f1365b8e-b091-4efd-897e-64a1382e17ca",
+  "plateNumber": "ABC-321",
+  "make": "Honda",
+  "model": "Civic",
+  "year": 2019
 }
 
 ### Get All Vehicles
 GET http://localhost:4000/api/v1/vehicles/
 
 ### Get Vehicle by ID
-GET http://localhost:4000/api/v1/vehicles/123e4567-e89b-12d3-a456-426614174000
+GET http://localhost:4000/api/v1/vehicles/2bc33d8f-a698-49d1-9b8e-883f39cb8cb8
 
 ### Get Vehicles by Customer
-GET http://localhost:4000/api/v1/vehicles/customer/123e4567-e89b-12d3-a456-426614174000
+GET http://localhost:4000/api/v1/vehicles/customer/f1365b8e-b091-4efd-897e-64a1382e17ca
 
 ### Update Vehicle
-PUT http://localhost:4000/api/v1/vehicles/123e4567-e89b-12d3-a456-426614174000
+PUT http://localhost:4000/api/v1/vehicles/2bc33d8f-a698-49d1-9b8e-883f39cb8cb8
 Content-Type: application/json
 
 {

@@ -13,10 +13,10 @@ Content-Type: application/json
 }
 
 ### Get Service Type by ID
-GET http://localhost:4000/api/v1/service-types/123e4567-e89b-12d3-a456-426614174000
+GET http://localhost:4000/api/v1/service-types/cb986fdf-fb77-4a67-9001-6c303b364129
 
 ### Update Service Type
-PUT http://localhost:4000/api/v1/service-types/123e4567-e89b-12d3-a456-426614174000
+PUT http://localhost:4000/api/v1/service-types/cb986fdf-fb77-4a67-9001-6c303b364129
 Content-Type: application/json
 
 {

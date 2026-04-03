@@ -3,22 +3,22 @@ POST http://localhost:4000/api/v1/customers/
 Content-Type: application/json
 
 {
-  "fullName": "John Doe",
-  "email": "john.doe@example.com",
-  "phone": "123-456-7890"
+  "fullName": "Jimwell Ibay",
+  "email": "ibayjimwell@gmail.com",
+  "phone": "09157803415"
 }
 
 ### Get All Customers
 GET http://localhost:4000/api/v1/customers/
 
 ### Get Customer by ID
-GET http://localhost:4000/api/v1/customers/123e4567-e89b-12d3-a456-426614174000
+GET http://localhost:4000/api/v1/customers/f1365b8e-b091-4efd-897e-64a1382e17ca
 
 ### Get Customer Appointments
-GET http://localhost:4000/api/v1/customers/123e4567-e89b-12d3-a456-426614174000/appointments
+GET http://localhost:4000/api/v1/customers/f1365b8e-b091-4efd-897e-64a1382e17ca/appointments
 
 ### Update Customer
-PUT http://localhost:4000/api/v1/customers/123e4567-e89b-12d3-a456-426614174000
+PUT http://localhost:4000/api/v1/customers/f1365b8e-b091-4efd-897e-64a1382e17ca
 Content-Type: application/json
 
 {

@@ -3,8 +3,8 @@ POST http://localhost:4000/api/v1/staff/
 Content-Type: application/json
 
 {
-  "fullName": "John Doe",
-  "email": "john.doe@staff.com",
+  "fullName": "John Duck",
+  "email": "john.duck@staff.com",
   "role": "Mechanic",
   "active": true
 }
