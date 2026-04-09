@@ -1,0 +1,125 @@
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+.flow-table{width:100%;border-collapse:collapse;font-size:12px}
+.flow-table th{font-size:11px;font-weight:500;color:var(--color-text-tertiary);letter-spacing:.04em;text-transform:uppercase;padding:6px 12px;text-align:left;border-bottom:0.5px solid var(--color-border-tertiary);background:var(--color-background-secondary)}
+.flow-table td{padding:12px;vertical-align:top;border-bottom:0.5px solid var(--color-border-tertiary);color:var(--color-text-secondary)}
+.flow-table tr:last-child td{border-bottom:none}
+.flow-table tr{cursor:pointer;transition:background .12s}
+.flow-table tr:hover td{background:var(--color-background-secondary)}
+.badge{display:inline-block;font-size:10px;font-weight:500;padding:2px 7px;border-radius:4px;white-space:nowrap}
+.b-gray{background:#F1EFE8;color:#5F5E5A}
+.b-blue{background:#E6F1FB;color:#185FA5}
+.b-amber{background:#FAEEDA;color:#854F0B}
+.b-purple{background:#EEEDFE;color:#534AB7}
+.b-teal{background:#E1F5EE;color:#0F6E56}
+.b-coral{background:#FAECE7;color:#993C1D}
+.payload{font-family:var(--font-mono);font-size:11px;color:var(--color-text-primary);background:var(--color-background-secondary);padding:4px 7px;border-radius:4px;display:inline-block;margin-top:4px;line-height:1.6}
+.td-actor{font-size:11px;color:var(--color-text-tertiary)}
+.notif-title{font-weight:500;color:var(--color-text-primary);font-size:12px}
+.notif-body{color:var(--color-text-secondary);font-size:11px;margin-top:2px}
+.deep-link{font-size:10px;color:var(--color-text-info);margin-top:3px;font-family:var(--font-mono)}
+</style>
+<div style="padding:4px 0 0;overflow-x:auto">
+<table class="flow-table">
+<thead>
+  <tr>
+    <th style="width:140px">Transition</th>
+    <th style="width:90px">Triggered by</th>
+    <th>DB writes</th>
+    <th>Push notification to customer</th>
+    <th>Deep-link target</th>
+  </tr>
+</thead>
+<tbody>
+  <tr onclick="sendPrompt('Write the Spring Boot service logic for when a new appointment is created — what DB records are created and what confirmation notification is sent to the customer?')">
+    <td><span class="badge b-gray">→ PENDING</span></td>
+    <td class="td-actor">System<br>(on booking)</td>
+    <td>
+      Insert <code>APPOINTMENT</code><br>
+      Insert status log row
+      <div class="payload">status: "PENDING"</div>
+    </td>
+    <td>
+      <div class="notif-title">Appointment confirmed</div>
+      <div class="notif-body">"Your booking for [service] on [date] at [time] is confirmed."</div>
+    </td>
+    <td><span class="deep-link">→ Appointment detail</span></td>
+  </tr>
+  <tr onclick="sendPrompt('Write the Spring Boot service logic for the PENDING to UNDER_INSPECTION transition — what is written to the DB and what notification fires?')">
+    <td><span class="badge b-blue">→ UNDER_INSPECTION</span></td>
+    <td class="td-actor">Staff</td>
+    <td>
+      Update <code>APPOINTMENT.status</code><br>
+      Insert status log row
+      <div class="payload">status: "UNDER_INSPECTION"<br>changed_by: staff_id<br>changed_at: now()</div>
+    </td>
+    <td>
+      <div class="notif-title">We've got your car</div>
+      <div class="notif-body">"Your [vehicle] is now being inspected. We'll update you shortly."</div>
+    </td>
+    <td><span class="deep-link">→ Service tracker</span></td>
+  </tr>
+  <tr onclick="sendPrompt('Write the Spring Boot service logic for UNDER_INSPECTION to WAITING_FOR_APPROVAL — including linking the initial invoice to the appointment and sending the approval push notification')">
+    <td><span class="badge b-amber">→ WAITING_FOR_APPROVAL</span></td>
+    <td class="td-actor">Staff<br>(on estimate submit)</td>
+    <td>
+      Update <code>APPOINTMENT.status</code><br>
+      Insert status log row<br>
+      Insert <code>INVOICE</code> (initial estimate)
+      <div class="payload">invoice_type: "ESTIMATE"<br>status: "PENDING_APPROVAL"</div>
+    </td>
+    <td>
+      <div class="notif-title">Action required — approval needed</div>
+      <div class="notif-body">"Your estimate is ready. Please review and approve to begin repairs."</div>
+    </td>
+    <td><span class="deep-link">→ Repair approval screen</span></td>
+  </tr>
+  <tr onclick="sendPrompt('Write the Spring Boot service logic for when a customer approves the repair estimate — status moves to IN_PROGRESS, invoice is updated, and notification fires')">
+    <td><span class="badge b-purple">→ IN_PROGRESS</span></td>
+    <td class="td-actor">System<br>(on customer approval)</td>
+    <td>
+      Update <code>APPOINTMENT.status</code><br>
+      Insert status log row<br>
+      Update <code>INVOICE.status</code>
+      <div class="payload">invoice_status: "APPROVED"<br>approved_at: now()</div>
+    </td>
+    <td>
+      <div class="notif-title">Work has begun</div>
+      <div class="notif-body">"You approved the estimate. Our team is now working on your vehicle."</div>
+    </td>
+    <td><span class="deep-link">→ Service tracker</span></td>
+  </tr>
+  <tr onclick="sendPrompt('Write the Spring Boot service logic for the IN_PROGRESS to COMPLETED transition — generating the final invoice and sending the completion notification')">
+    <td><span class="badge b-teal">→ COMPLETED</span></td>
+    <td class="td-actor">Staff</td>
+    <td>
+      Update <code>APPOINTMENT.status</code><br>
+      Insert status log row<br>
+      Insert <code>INVOICE</code> (final)<br>
+      Update estimate → final
+      <div class="payload">invoice_type: "FINAL"<br>completed_at: now()</div>
+    </td>
+    <td>
+      <div class="notif-title">Your car is ready</div>
+      <div class="notif-body">"Service complete! Your receipt is ready. Please proceed to the counter."</div>
+    </td>
+    <td><span class="deep-link">→ Digital receipt</span></td>
+  </tr>
+  <tr onclick="sendPrompt('Write the Spring Boot service logic for cancelling an appointment from any stage — what gets updated, what notification fires, and how is the invoice handled?')">
+    <td><span class="badge b-coral">→ CANCELLED</span></td>
+    <td class="td-actor">Customer or<br>admin/staff</td>
+    <td>
+      Update <code>APPOINTMENT.status</code><br>
+      Insert status log row<br>
+      Void any open invoice
+      <div class="payload">cancelled_by: user_id<br>cancel_reason: string</div>
+    </td>
+    <td>
+      <div class="notif-title">Appointment cancelled</div>
+      <div class="notif-body">"Your appointment on [date] has been cancelled."</div>
+    </td>
+    <td><span class="deep-link">→ Appointment list</span></td>
+  </tr>
+</tbody>
+</table>
+</div>
