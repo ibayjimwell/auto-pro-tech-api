@@ -8,6 +8,7 @@ import {
   AppointmentStatusLogs,
 } from '../models/index.js';
 import { eq, and, sql, lt, gt, gte, lte, desc } from 'drizzle-orm';
+import { getIo } from '../websocket.js';
 
 /**
  * Helper: Check if a time slot overlaps existing appointments on a given date
@@ -78,7 +79,6 @@ export const getAvailableSlots = async (req, res, next) => {
   try {
     const { date, serviceTypeId } = req.query;
 
-    // Validate required fields
     if (!date || !serviceTypeId) {
       return res.status(400).json({
         success: false,
@@ -86,7 +86,6 @@ export const getAvailableSlots = async (req, res, next) => {
       });
     }
 
-    // Validate date format
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return res.status(400).json({
         success: false,
@@ -119,7 +118,7 @@ export const getAvailableSlots = async (req, res, next) => {
     const slots = [];
     let current = new Date(`1970-01-01T${shopOpen}`);
     const endLimit = new Date(`1970-01-01T${shopClose}`);
-    endLimit.setMinutes(endLimit.getMinutes() - duration); // last start time
+    endLimit.setMinutes(endLimit.getMinutes() - duration);
 
     while (current <= endLimit) {
       const timeStr = current.toTimeString().slice(0, 8);
@@ -137,8 +136,6 @@ export const getAvailableSlots = async (req, res, next) => {
 /**
  * POST /api/v1/appointments
  * Create a new appointment
- * Body: customerId, vehicleId, serviceTypeId, appointmentDate, appointmentTime, notes?, assignedStaffId?
- * Role: all
  */
 export const createAppointment = async (req, res, next) => {
   try {
@@ -152,7 +149,6 @@ export const createAppointment = async (req, res, next) => {
       assignedStaffId,
     } = req.body;
 
-    // Validate required fields
     if (!customerId || !vehicleId || !serviceTypeId || !appointmentDate || !appointmentTime) {
       return res.status(400).json({
         success: false,
@@ -160,7 +156,6 @@ export const createAppointment = async (req, res, next) => {
       });
     }
 
-    // Validate date format
     if (!/^\d{4}-\d{2}-\d{2}$/.test(appointmentDate)) {
       return res.status(400).json({
         success: false,
@@ -168,7 +163,6 @@ export const createAppointment = async (req, res, next) => {
       });
     }
 
-    // Validate time format
     if (!/^\d{2}:\d{2}:\d{2}$/.test(appointmentTime)) {
       return res.status(400).json({
         success: false,
@@ -176,58 +170,32 @@ export const createAppointment = async (req, res, next) => {
       });
     }
 
-    // Check existence of referenced entities
-    const [customer] = await Database.select()
-      .from(Customers)
-      .where(eq(Customers.id, customerId));
+    const [customer] = await Database.select().from(Customers).where(eq(Customers.id, customerId));
     if (!customer) {
-      return res.status(404).json({
-        success: false,
-        message: 'Customer not found',
-      });
+      return res.status(404).json({ success: false, message: 'Customer not found' });
     }
 
-    const [vehicle] = await Database.select()
-      .from(Vehicles)
-      .where(eq(Vehicles.id, vehicleId));
+    const [vehicle] = await Database.select().from(Vehicles).where(eq(Vehicles.id, vehicleId));
     if (!vehicle) {
-      return res.status(404).json({
-        success: false,
-        message: 'Vehicle not found',
-      });
+      return res.status(404).json({ success: false, message: 'Vehicle not found' });
     }
 
-    const [serviceType] = await Database.select()
-      .from(ServiceTypes)
-      .where(eq(ServiceTypes.id, serviceTypeId));
+    const [serviceType] = await Database.select().from(ServiceTypes).where(eq(ServiceTypes.id, serviceTypeId));
     if (!serviceType) {
-      return res.status(404).json({
-        success: false,
-        message: 'Service type not found',
-      });
+      return res.status(404).json({ success: false, message: 'Service type not found' });
     }
-
     if (!serviceType.active) {
-      return res.status(400).json({
-        success: false,
-        message: 'Service type is not active',
-      });
+      return res.status(400).json({ success: false, message: 'Service type is not active' });
     }
 
     let staff = null;
     if (assignedStaffId) {
-      [staff] = await Database.select()
-        .from(Staff)
-        .where(eq(Staff.id, assignedStaffId));
+      [staff] = await Database.select().from(Staff).where(eq(Staff.id, assignedStaffId));
       if (!staff) {
-        return res.status(404).json({
-          success: false,
-          message: 'Staff member not found',
-        });
+        return res.status(404).json({ success: false, message: 'Staff member not found' });
       }
     }
 
-    // Check slot availability
     const duration = serviceType.durationMinutes;
     const available = await isSlotAvailable(appointmentDate, appointmentTime, duration);
     if (!available) {
@@ -237,7 +205,6 @@ export const createAppointment = async (req, res, next) => {
       });
     }
 
-    // Create appointment
     const [appointment] = await Database.insert(Appointments)
       .values({
         customerId,
@@ -252,8 +219,11 @@ export const createAppointment = async (req, res, next) => {
       })
       .returning();
 
-    // Log initial status
     await logStatusChange(appointment.id, null, 'PENDING', 'Appointment created', null);
+
+    // 🔁 Real-time update via WebSocket
+    const io = getIo();
+    io.emit('appointmentChanged', { type: 'created', appointment });
 
     res.status(201).json({ success: true, data: appointment });
   } catch (error) {
@@ -263,9 +233,7 @@ export const createAppointment = async (req, res, next) => {
 
 /**
  * GET /api/v1/appointments
- * List all appointments with optional filtering
- * Query params: status, from (date), to (date), page (default 1), limit (default 20)
- * Role: admin, staff
+ * List appointments with filtering and pagination
  */
 export const getAppointments = async (req, res, next) => {
   try {
@@ -304,10 +272,7 @@ export const getAppointments = async (req, res, next) => {
       );
     }
 
-    // Get total count for pagination
-    const [{ count }] = await Database.select({ count: sql`count(*)` })
-      .from(Appointments);
-
+    const [{ count }] = await Database.select({ count: sql`count(*)` }).from(Appointments);
     const appointments = await query
       .limit(limitNum)
       .offset(offset)
@@ -330,24 +295,14 @@ export const getAppointments = async (req, res, next) => {
 
 /**
  * GET /api/v1/appointments/{id}
- * Get full appointment detail by ID
- * Role: all
  */
 export const getAppointmentById = async (req, res, next) => {
   try {
     const { id } = req.params;
-
-    const [appointment] = await Database.select()
-      .from(Appointments)
-      .where(eq(Appointments.id, id));
-
+    const [appointment] = await Database.select().from(Appointments).where(eq(Appointments.id, id));
     if (!appointment) {
-      return res.status(404).json({
-        success: false,
-        message: 'Appointment not found',
-      });
+      return res.status(404).json({ success: false, message: 'Appointment not found' });
     }
-
     res.json({ success: true, data: appointment });
   } catch (error) {
     next(error);
@@ -356,79 +311,46 @@ export const getAppointmentById = async (req, res, next) => {
 
 /**
  * PUT /api/v1/appointments/{id}
- * Update appointment details (date, time, service type, assigned staff, notes)
- * Body: appointmentDate?, appointmentTime?, serviceTypeId?, notes?, assignedStaffId?
- * Role: admin, staff
+ * Update appointment details
  */
 export const updateAppointment = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { appointmentDate, appointmentTime, serviceTypeId, notes, assignedStaffId } = req.body;
 
-    const [existing] = await Database.select()
-      .from(Appointments)
-      .where(eq(Appointments.id, id));
-
+    const [existing] = await Database.select().from(Appointments).where(eq(Appointments.id, id));
     if (!existing) {
-      return res.status(404).json({
-        success: false,
-        message: 'Appointment not found',
-      });
+      return res.status(404).json({ success: false, message: 'Appointment not found' });
     }
 
-    // Validate formats if provided
     if (appointmentDate && !/^\d{4}-\d{2}-\d{2}$/.test(appointmentDate)) {
-      return res.status(400).json({
-        success: false,
-        message: 'appointmentDate must be in YYYY-MM-DD format',
-      });
+      return res.status(400).json({ success: false, message: 'Invalid date format' });
     }
-
     if (appointmentTime && !/^\d{2}:\d{2}:\d{2}$/.test(appointmentTime)) {
-      return res.status(400).json({
-        success: false,
-        message: 'appointmentTime must be in HH:MM:SS format',
-      });
+      return res.status(400).json({ success: false, message: 'Invalid time format' });
     }
 
-    // Check conflicts if date/time changed
     let duration = existing.durationMinutes;
     if (serviceTypeId && serviceTypeId !== existing.serviceTypeId) {
-      const [newService] = await Database.select()
-        .from(ServiceTypes)
-        .where(eq(ServiceTypes.id, serviceTypeId));
+      const [newService] = await Database.select().from(ServiceTypes).where(eq(ServiceTypes.id, serviceTypeId));
       if (!newService) {
-        return res.status(404).json({
-          success: false,
-          message: 'Service type not found',
-        });
+        return res.status(404).json({ success: false, message: 'Service type not found' });
       }
       if (!newService.active) {
-        return res.status(400).json({
-          success: false,
-          message: 'Service type is not active',
-        });
+        return res.status(400).json({ success: false, message: 'Service type is not active' });
       }
       duration = newService.durationMinutes;
     }
 
-    // Validate assigned staff if provided
     if (assignedStaffId) {
-      const [staff] = await Database.select()
-        .from(Staff)
-        .where(eq(Staff.id, assignedStaffId));
+      const [staff] = await Database.select().from(Staff).where(eq(Staff.id, assignedStaffId));
       if (!staff) {
-        return res.status(404).json({
-          success: false,
-          message: 'Staff member not found',
-        });
+        return res.status(404).json({ success: false, message: 'Staff member not found' });
       }
     }
 
     const newDate = appointmentDate || existing.appointmentDate;
     const newTime = appointmentTime || existing.appointmentTime;
-
-    // Check if slot is available if date/time changed
     if (newDate !== existing.appointmentDate || newTime !== existing.appointmentTime) {
       const available = await isSlotAvailable(newDate, newTime, duration, id);
       if (!available) {
@@ -445,7 +367,6 @@ export const updateAppointment = async (req, res, next) => {
       notes: notes !== undefined ? notes : existing.notes,
       updatedAt: new Date(),
     };
-
     if (serviceTypeId) updateData.serviceTypeId = serviceTypeId;
     if (duration !== existing.durationMinutes) updateData.durationMinutes = duration;
     if (assignedStaffId !== undefined) updateData.assignedStaffId = assignedStaffId || null;
@@ -455,6 +376,10 @@ export const updateAppointment = async (req, res, next) => {
       .where(eq(Appointments.id, id))
       .returning();
 
+    // 🔁 Real-time update
+    const io = getIo();
+    io.emit('appointmentChanged', { type: 'updated', appointment: updated });
+
     res.json({ success: true, data: updated });
   } catch (error) {
     next(error);
@@ -463,24 +388,16 @@ export const updateAppointment = async (req, res, next) => {
 
 /**
  * DELETE /api/v1/appointments/{id}
- * Cancel an appointment (soft delete - marks as CANCELLED)
- * Body: notes? (reason for cancellation)
- * Role: admin, staff
+ * Soft delete – mark as CANCELLED
  */
 export const cancelAppointment = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { notes } = req.body || {};
 
-    const [existing] = await Database.select()
-      .from(Appointments)
-      .where(eq(Appointments.id, id));
-
+    const [existing] = await Database.select().from(Appointments).where(eq(Appointments.id, id));
     if (!existing) {
-      return res.status(404).json({
-        success: false,
-        message: 'Appointment not found',
-      });
+      return res.status(404).json({ success: false, message: 'Appointment not found' });
     }
 
     const [updated] = await Database.update(Appointments)
@@ -492,14 +409,13 @@ export const cancelAppointment = async (req, res, next) => {
       .where(eq(Appointments.id, id))
       .returning();
 
-    // Log status change
     await logStatusChange(id, existing.status, 'CANCELLED', notes || 'Appointment cancelled');
 
-    res.json({
-      success: true,
-      message: 'Appointment cancelled successfully',
-      data: updated,
-    });
+    // 🔁 Real-time update
+    const io = getIo();
+    io.emit('appointmentChanged', { type: 'cancelled', appointment: updated });
+
+    res.json({ success: true, message: 'Appointment cancelled successfully', data: updated });
   } catch (error) {
     next(error);
   }
@@ -507,9 +423,7 @@ export const cancelAppointment = async (req, res, next) => {
 
 /**
  * PATCH /api/v1/appointments/{id}/status
- * Update appointment status with validation of allowed transitions
- * Body: status (string), notes? (optional change notes)
- * Role: admin, staff
+ * Update appointment status with validation
  */
 export const updateAppointmentStatus = async (req, res, next) => {
   try {
@@ -517,34 +431,20 @@ export const updateAppointmentStatus = async (req, res, next) => {
     const { status, notes } = req.body;
 
     if (!status) {
-      return res.status(400).json({
-        success: false,
-        message: 'status is required',
-      });
+      return res.status(400).json({ success: false, message: 'status is required' });
     }
 
     const allowed = ['PENDING', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'];
     if (!allowed.includes(status.toUpperCase())) {
-      return res.status(400).json({
-        success: false,
-        message: `Invalid status. Allowed: ${allowed.join(', ')}`,
-      });
+      return res.status(400).json({ success: false, message: `Invalid status. Allowed: ${allowed.join(', ')}` });
     }
 
-    const [existing] = await Database.select()
-      .from(Appointments)
-      .where(eq(Appointments.id, id));
-
+    const [existing] = await Database.select().from(Appointments).where(eq(Appointments.id, id));
     if (!existing) {
-      return res.status(404).json({
-        success: false,
-        message: 'Appointment not found',
-      });
+      return res.status(404).json({ success: false, message: 'Appointment not found' });
     }
 
     const newStatus = status.toUpperCase();
-
-    // Validate status transitions (simple rules)
     const validTransitions = {
       PENDING: ['CONFIRMED', 'CANCELLED'],
       CONFIRMED: ['IN_PROGRESS', 'PENDING', 'CANCELLED'],
@@ -552,7 +452,6 @@ export const updateAppointmentStatus = async (req, res, next) => {
       COMPLETED: [],
       CANCELLED: [],
     };
-
     if (!validTransitions[existing.status]?.includes(newStatus)) {
       return res.status(400).json({
         success: false,
@@ -569,8 +468,11 @@ export const updateAppointmentStatus = async (req, res, next) => {
       .where(eq(Appointments.id, id))
       .returning();
 
-    // Log status change
     await logStatusChange(id, existing.status, newStatus, notes || null);
+
+    // 🔁 Real-time update
+    const io = getIo();
+    io.emit('appointmentChanged', { type: 'statusChanged', appointment: updated });
 
     res.json({ success: true, data: updated });
   } catch (error) {
@@ -580,34 +482,19 @@ export const updateAppointmentStatus = async (req, res, next) => {
 
 /**
  * GET /api/v1/appointments/{id}/status-log
- * Get full status change history (audit trail) for an appointment
- * Role: all
  */
 export const getAppointmentStatusLog = async (req, res, next) => {
   try {
     const { id } = req.params;
-
-    // Verify appointment exists
-    const [appointment] = await Database.select()
-      .from(Appointments)
-      .where(eq(Appointments.id, id));
-
+    const [appointment] = await Database.select().from(Appointments).where(eq(Appointments.id, id));
     if (!appointment) {
-      return res.status(404).json({
-        success: false,
-        message: 'Appointment not found',
-      });
+      return res.status(404).json({ success: false, message: 'Appointment not found' });
     }
-
     const statusLogs = await Database.select()
       .from(AppointmentStatusLogs)
       .where(eq(AppointmentStatusLogs.appointmentId, id))
       .orderBy(desc(AppointmentStatusLogs.changedAt));
-
-    res.json({
-      success: true,
-      data: statusLogs,
-    });
+    res.json({ success: true, data: statusLogs });
   } catch (error) {
     next(error);
   }
@@ -615,51 +502,33 @@ export const getAppointmentStatusLog = async (req, res, next) => {
 
 /**
  * GET /api/v1/customers/{customerId}/appointments
- * Get all appointments for a specific customer (customer-scoped view)
- * Query params: page (default 1), limit (default 20), status?
- * Role: customer (own appointments), admin, staff (all customers)
  */
 export const getCustomerAppointments = async (req, res, next) => {
   try {
     const { customerId } = req.params;
     const { page = 1, limit = 20, status } = req.query;
 
-    // Verify customer exists
-    const [customer] = await Database.select()
-      .from(Customers)
-      .where(eq(Customers.id, customerId));
-
+    const [customer] = await Database.select().from(Customers).where(eq(Customers.id, customerId));
     if (!customer) {
-      return res.status(404).json({
-        success: false,
-        message: 'Customer not found',
-      });
+      return res.status(404).json({ success: false, message: 'Customer not found' });
     }
 
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
     const offset = (pageNum - 1) * limitNum;
 
-    let query = Database.select()
-      .from(Appointments)
-      .where(eq(Appointments.customerId, customerId));
-
+    let query = Database.select().from(Appointments).where(eq(Appointments.customerId, customerId));
     if (status) {
       const validStatuses = ['PENDING', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'];
       if (!validStatuses.includes(status.toUpperCase())) {
-        return res.status(400).json({
-          success: false,
-          message: `Invalid status. Allowed: ${validStatuses.join(', ')}`,
-        });
+        return res.status(400).json({ success: false, message: `Invalid status. Allowed: ${validStatuses.join(', ')}` });
       }
       query = query.where(eq(Appointments.status, status.toUpperCase()));
     }
 
-    // Get total count
     const [{ count }] = await Database.select({ count: sql`count(*)` })
       .from(Appointments)
       .where(eq(Appointments.customerId, customerId));
-
     const appointments = await query
       .limit(limitNum)
       .offset(offset)
@@ -682,15 +551,11 @@ export const getCustomerAppointments = async (req, res, next) => {
 
 /**
  * GET /api/v1/appointments/calendar
- * Get appointments grouped by date for calendar view
- * Query params: month (YYYY-MM format, default current month)
- * Role: admin
+ * Grouped appointments by date for calendar view
  */
 export const getCalendarView = async (req, res, next) => {
   try {
     const { month } = req.query;
-
-    // Parse month or use current
     let startDate, endDate;
     if (month && /^\d{4}-\d{2}$/.test(month)) {
       const [year, monthNum] = month.split('-').map(Number);
@@ -707,19 +572,14 @@ export const getCalendarView = async (req, res, next) => {
 
     const appointments = await Database.select()
       .from(Appointments)
-      .where(
-        sql`${Appointments.appointmentDate} BETWEEN ${startStr} AND ${endStr}`
-      )
+      .where(sql`${Appointments.appointmentDate} BETWEEN ${startStr} AND ${endStr}`)
       .where(sql`${Appointments.status} != 'CANCELLED'`)
       .orderBy(Appointments.appointmentDate, Appointments.appointmentTime);
 
-    // Group by date
     const calendarData = {};
     appointments.forEach((apt) => {
       const date = apt.appointmentDate;
-      if (!calendarData[date]) {
-        calendarData[date] = [];
-      }
+      if (!calendarData[date]) calendarData[date] = [];
       calendarData[date].push(apt);
     });
 
