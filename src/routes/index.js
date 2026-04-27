@@ -5,6 +5,7 @@ import serviceTypesRouter from "./service-types.route.js";
 import vehiclesRouter from "./vehicles.route.js";
 import staffRouter from "./staff.route.js";
 import invoicesRouter from "./invoices.route.js";
+import authRouter from "./auth.route.js";
 
 const router = Router();
 
@@ -14,5 +15,6 @@ router.use("/service-types", serviceTypesRouter);
 router.use("/vehicles", vehiclesRouter);
 router.use("/staff", staffRouter);
 router.use("/invoices", invoicesRouter);
+router.use("/auth", authRouter);
 
 export default router;

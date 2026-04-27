@@ -35,7 +35,7 @@ const startServer = async () => {
     const server = createServer(app);
     initWebsocket(server);
 
-    server.listen(PORT, () => {
+    server.listen(PORT, '0.0.0.0', () => {
       console.log(`App is running on PORT ${PORT}`);
     });
   } catch (error) {

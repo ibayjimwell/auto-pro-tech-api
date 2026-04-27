@@ -7,6 +7,8 @@ export const Staff = pgTable('staff', {
   password: varchar('password', { length: 255 }).notNull(), // store hashed password
   role: varchar('role', { length: 50 }),
   active: boolean('active').default(true).notNull(),
+  tempPassword: boolean('temp_password').default(false),
+  tempExpiresAt: timestamp('temp_expires_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (table) => ({
   usernameIdx: index('staff_username_idx').on(table.username),
