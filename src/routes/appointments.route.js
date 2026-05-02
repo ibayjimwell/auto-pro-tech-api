@@ -8,6 +8,7 @@ import {
   cancelAppointment,
   getCustomerAppointments,
   getCalendarView,
+  checkAvailability,
 } from '../controllers/appointments.controller.js';
 import {
   patchAppointmentStatus,
@@ -34,5 +35,8 @@ appointmentsRouter.get('/:id/status-log', getAppointmentStatusLog);
 
 // Optional staff dashboard
 appointmentsRouter.get('/tracking', getTrackingAppointments);
+
+// Checking
+appointmentsRouter.post('/check-availability', checkAvailability);
 
 export default appointmentsRouter;

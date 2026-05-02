@@ -9,6 +9,8 @@ import {
 } from '../models/index.js';
 import { eq, and, sql, lt, gt, gte, lte, desc } from 'drizzle-orm';
 import { getIo } from '../websocket.js';
+import { sendPushNotification } from '../services/push.service.js';
+import { PushTokens } from '../models/index.js';
 
 /**
  * Helper: Check if a time slot overlaps existing appointments on a given date
@@ -233,7 +235,7 @@ export const createAppointment = async (req, res, next) => {
 
 /**
  * GET /api/v1/appointments
- * List appointments with filtering and pagination
+ * List appointments with filtering, pagination, and customer/vehicle/service details
  */
 export const getAppointments = async (req, res, next) => {
   try {
@@ -243,8 +245,46 @@ export const getAppointments = async (req, res, next) => {
     const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
     const offset = (pageNum - 1) * limitNum;
 
-    let query = Database.select().from(Appointments);
+    // Query with joins to get customer, vehicle and service type details
+    let query = Database.select({
+      id: Appointments.id,
+      customerId: Appointments.customerId,
+      vehicleId: Appointments.vehicleId,
+      serviceTypeId: Appointments.serviceTypeId,
+      assignedStaffId: Appointments.assignedStaffId,
+      appointmentDate: Appointments.appointmentDate,
+      appointmentTime: Appointments.appointmentTime,
+      durationMinutes: Appointments.durationMinutes,
+      status: Appointments.status,
+      notes: Appointments.notes,
+      createdAt: Appointments.createdAt,
+      updatedAt: Appointments.updatedAt,
+      customer: {
+        id: Customers.id,
+        fullName: Customers.fullName,
+        email: Customers.email,
+        phone: Customers.phone,
+      },
+      vehicle: {
+        id: Vehicles.id,
+        make: Vehicles.make,
+        model: Vehicles.model,
+        year: Vehicles.year,
+        plateNumber: Vehicles.plateNumber,
+      },
+      serviceType: {
+        id: ServiceTypes.id,
+        name: ServiceTypes.name,
+        basePrice: ServiceTypes.basePrice,
+        durationMinutes: ServiceTypes.durationMinutes,
+      },
+    })
+      .from(Appointments)
+      .leftJoin(Customers, eq(Appointments.customerId, Customers.id))
+      .leftJoin(Vehicles, eq(Appointments.vehicleId, Vehicles.id))
+      .leftJoin(ServiceTypes, eq(Appointments.serviceTypeId, ServiceTypes.id));
 
+    // Apply filters
     if (status) {
       const validStatuses = ['PENDING', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'];
       if (!validStatuses.includes(status.toUpperCase())) {
@@ -272,12 +312,14 @@ export const getAppointments = async (req, res, next) => {
       );
     }
 
+    // Get total count (simplified)
     const [{ count }] = await Database.select({ count: sql`count(*)` }).from(Appointments);
     const appointments = await query
       .limit(limitNum)
       .offset(offset)
       .orderBy(desc(Appointments.appointmentDate));
 
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
     res.json({
       success: true,
       data: appointments,
@@ -470,9 +512,76 @@ export const updateAppointmentStatus = async (req, res, next) => {
 
     await logStatusChange(id, existing.status, newStatus, notes || null);
 
-    // 🔁 Real-time update
+    // ----------------------------------------------------------------------
+    // 🔔 Push Notifications – only when status changes to CONFIRMED
+    // (Optional: also for CANCELLED, UNDER_INSPECTION, etc.)
+    // ----------------------------------------------------------------------
+    if (newStatus === 'CONFIRMED') {
+      try {
+        // Fetch all push tokens for this customer
+        const pushTokens = await Database.select()
+          .from(PushTokens)
+          .where(eq(PushTokens.customerId, existing.customerId));
+
+        if (pushTokens.length > 0) {
+          const tokenList = pushTokens.map(t => t.token);
+          const dateStr = existing.appointmentDate;
+          const timeStr = existing.appointmentTime.slice(0, 5); // "HH:MM"
+          const title = 'Appointment Confirmed';
+          const body = `Your appointment on ${dateStr} at ${timeStr} has been confirmed.`;
+          // Use a custom sound if you have one, e.g., 'confirmed.wav'
+          await sendPushNotification(tokenList, title, body, { appointmentId: id }, 'notification_sound.wav');
+        }
+      } catch (pushError) {
+        // Log error but do NOT interrupt the main response flow
+        console.error('Push notification failed:', pushError);
+      }
+    }
+
+    // ----------------------------------------------------------------------
+    // 🔁 Real-time update with full joined data (WebSocket)
+    // ----------------------------------------------------------------------
+    const [fullAppointment] = await Database.select({
+      id: Appointments.id,
+      customerId: Appointments.customerId,
+      vehicleId: Appointments.vehicleId,
+      serviceTypeId: Appointments.serviceTypeId,
+      assignedStaffId: Appointments.assignedStaffId,
+      appointmentDate: Appointments.appointmentDate,
+      appointmentTime: Appointments.appointmentTime,
+      durationMinutes: Appointments.durationMinutes,
+      status: Appointments.status,
+      notes: Appointments.notes,
+      createdAt: Appointments.createdAt,
+      updatedAt: Appointments.updatedAt,
+      customer: {
+        id: Customers.id,
+        fullName: Customers.fullName,
+        email: Customers.email,
+        phone: Customers.phone,
+      },
+      vehicle: {
+        id: Vehicles.id,
+        make: Vehicles.make,
+        model: Vehicles.model,
+        year: Vehicles.year,
+        plateNumber: Vehicles.plateNumber,
+      },
+      serviceType: {
+        id: ServiceTypes.id,
+        name: ServiceTypes.name,
+        basePrice: ServiceTypes.basePrice,
+        durationMinutes: ServiceTypes.durationMinutes,
+      },
+    })
+      .from(Appointments)
+      .leftJoin(Customers, eq(Appointments.customerId, Customers.id))
+      .leftJoin(Vehicles, eq(Appointments.vehicleId, Vehicles.id))
+      .leftJoin(ServiceTypes, eq(Appointments.serviceTypeId, ServiceTypes.id))
+      .where(eq(Appointments.id, id));
+
     const io = getIo();
-    io.emit('appointmentChanged', { type: 'statusChanged', appointment: updated });
+    io.emit('appointmentChanged', { type: 'statusChanged', appointment: fullAppointment });
 
     res.json({ success: true, data: updated });
   } catch (error) {
@@ -588,6 +697,61 @@ export const getCalendarView = async (req, res, next) => {
       month: month || startStr.slice(0, 7),
       data: calendarData,
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/v1/appointments/check-availability
+ * Body: { date (YYYY-MM-DD), startTime (HH:MM:SS), serviceTypeId }
+ * Returns { available: boolean }
+ */
+export const checkAvailability = async (req, res, next) => {
+  try {
+    const { date, startTime, serviceTypeId } = req.body;
+    if (!date || !startTime || !serviceTypeId) {
+      return res.status(400).json({ success: false, message: 'Missing required fields' });
+    }
+
+    // 1. Service type existence
+    const [serviceType] = await Database.select()
+      .from(ServiceTypes)
+      .where(eq(ServiceTypes.id, serviceTypeId));
+    if (!serviceType) {
+      return res.status(404).json({ success: false, message: 'Service type not found' });
+    }
+    if (!serviceType.active) {
+      return res.status(400).json({ success: false, message: 'Service type is not active' });
+    }
+
+    const duration = serviceType.durationMinutes;
+
+    // 2. Parse time
+    const [hour, minute, second] = startTime.split(':').map(Number);
+    const slotTime = new Date();
+    slotTime.setHours(hour, minute, second || 0);
+
+    // 3. Check if the time is in the past (for today only)
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (date === todayStr) {
+      const now = new Date();
+      if (slotTime < now) {
+        return res.json({ success: true, available: false });
+      }
+    }
+
+    // 4. Check shop hours: service must start between 08:00 and 17:00 - duration
+    const shopOpen = 8 * 60;           // 08:00 in minutes
+    const shopClose = 17 * 60;         // 17:00 in minutes
+    const totalMinutes = hour * 60 + minute;
+    if (totalMinutes < shopOpen || totalMinutes + duration > shopClose) {
+      return res.json({ success: true, available: false });
+    }
+
+    // 5. Check overlapping appointments via existing isSlotAvailable helper
+    const available = await isSlotAvailable(date, startTime, duration);
+    res.json({ success: true, available });
   } catch (error) {
     next(error);
   }

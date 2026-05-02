@@ -9,3 +9,4 @@ export * from './service-types.model.js';
 export * from './appointments.model.js';
 export * from './appointment-status-log.model.js';
 export * from './invoices.model.js';
+export * from './push-tokens.model.js';
