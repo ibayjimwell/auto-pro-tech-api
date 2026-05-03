@@ -7,6 +7,8 @@ import staffRouter from "./staff.route.js";
 import invoicesRouter from "./invoices.route.js";
 import authRouter from "./auth.route.js";
 import pushTokensRouter from './pushTokens.route.js';
+import inspectionRouter from './inspection.route.js';
+import inventoryRouter from './inventory.route.js';
 
 const router = Router();
 
@@ -18,5 +20,7 @@ router.use("/staff", staffRouter);
 router.use("/invoices", invoicesRouter);
 router.use("/auth", authRouter);
 router.use('/push-tokens', pushTokensRouter);
+router.use('/inspection', inspectionRouter);
+router.use('/inventory', inventoryRouter);
 
 export default router;
