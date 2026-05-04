@@ -32,33 +32,35 @@ export const createServiceType = async (req, res, next) => {
     const { name, description, basePrice, durationMinutes } = req.body;
 
     // Validation
-    if (!name || !basePrice || !durationMinutes) {
+    if (!name) {
       return res.status(400).json({
         success: false,
-        message: 'name, basePrice, and durationMinutes are required',
+        message: 'name is required',
       });
     }
 
-    if (typeof basePrice !== 'number' || basePrice <= 0) {
-      return res.status(400).json({
+    // ➕ Check for duplicate name
+    const [existing] = await Database.select()
+      .from(ServiceTypes)
+      .where(eq(ServiceTypes.name, name));
+
+    if (existing) {
+      return res.status(409).json({
         success: false,
-        message: 'basePrice must be a positive number',
+        message: `A service type with the name "${name}" already exists.`,
       });
     }
 
-    if (typeof durationMinutes !== 'number' || durationMinutes <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'durationMinutes must be a positive number',
-      });
-    }
+    // Convert to numbers if they come as strings
+    const priceNum = typeof basePrice === 'number' ? basePrice : parseFloat(basePrice);
+    const durationNum = typeof durationMinutes === 'number' ? durationMinutes : parseInt(durationMinutes, 10);
 
     const [serviceType] = await Database.insert(ServiceTypes)
       .values({
         name,
         description: description || null,
-        basePrice,
-        durationMinutes,
+        basePrice: priceNum,
+        durationMinutes: durationNum,
         active: true,
       })
       .returning();
@@ -159,6 +161,90 @@ export const getServiceTypeById = async (req, res, next) => {
       success: true,
       data: serviceType,
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * DELETE /api/v1/service-types/{id}
+ * Delete a service type (soft delete by setting active = false)
+ * Role: admin only
+ */
+export const deleteServiceType = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const [existing] = await Database.select()
+      .from(ServiceTypes)
+      .where(eq(ServiceTypes.id, id));
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: 'Service type not found',
+      });
+    }
+
+    // Soft delete – set active to false
+    const [deleted] = await Database.update(ServiceTypes)
+      .set({ active: false })
+      .where(eq(ServiceTypes.id, id))
+      .returning();
+
+    res.json({
+      success: true,
+      message: 'Service type deactivated',
+      data: deleted,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/v1/service-types
+ * List service types with optional active filter
+ */
+export const getServiceTypesWithFilter = async (req, res, next) => {
+  try {
+    const { active } = req.query; // "true" or "false"
+    let query = Database.select().from(ServiceTypes);
+    
+    if (active !== undefined) {
+      const isActive = active === 'true';
+      query = query.where(eq(ServiceTypes.active, isActive));
+    }
+    
+    const serviceTypes = await query;
+    res.json({ success: true, data: serviceTypes });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * DELETE /api/v1/service-types/{id}/permanent
+ * Permanently delete a service type (only allowed if active = false)
+ */
+export const permanentDeleteServiceType = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    
+    const [existing] = await Database.select()
+      .from(ServiceTypes)
+      .where(eq(ServiceTypes.id, id));
+    
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Service type not found' });
+    }
+    
+    if (existing.active === true) {
+      return res.status(400).json({ success: false, message: 'Cannot delete active service type. Deactivate it first.' });
+    }
+    
+    await Database.delete(ServiceTypes).where(eq(ServiceTypes.id, id));
+    res.json({ success: true, message: 'Service type permanently deleted' });
   } catch (error) {
     next(error);
   }
