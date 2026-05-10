@@ -9,6 +9,8 @@ import {
   getCustomerAppointments,
   getCalendarView,
   checkAvailability,
+  approveEstimate,
+  rejectEstimate,
 } from '../controllers/appointments.controller.js';
 import {
   patchAppointmentStatus,
@@ -38,5 +40,9 @@ appointmentsRouter.get('/tracking', getTrackingAppointments);
 
 // Checking
 appointmentsRouter.post('/check-availability', checkAvailability);
+
+// Customer approval workflow
+appointmentsRouter.post('/:id/approve', approveEstimate);
+appointmentsRouter.post('/:id/reject', rejectEstimate);
 
 export default appointmentsRouter;

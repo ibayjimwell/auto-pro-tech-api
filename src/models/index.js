@@ -18,3 +18,4 @@ export * from './task-findings-products.model.js';
 export * from './inventory-items.model.js';
 export * from './inspection-finding-products.model.js';
 export * from './estimate-adjustments.model.js';
+export * from './additional-costs.model.js';

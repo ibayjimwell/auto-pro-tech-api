@@ -6,6 +6,10 @@ import {
   ServiceTypes,
   Staff,
   AppointmentStatusLogs,
+  InspectionTasks,
+  InspectionFindings,
+  InspectionFindingProducts,
+  Invoices,
 } from '../models/index.js';
 import { eq, and, sql, lt, gt, gte, lte, desc } from 'drizzle-orm';
 import { getIo } from '../websocket.js';
@@ -341,7 +345,45 @@ export const getAppointments = async (req, res, next) => {
 export const getAppointmentById = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const [appointment] = await Database.select().from(Appointments).where(eq(Appointments.id, id));
+    const [appointment] = await Database.select({
+      id: Appointments.id,
+      customerId: Appointments.customerId,
+      vehicleId: Appointments.vehicleId,
+      serviceTypeId: Appointments.serviceTypeId,
+      assignedStaffId: Appointments.assignedStaffId,
+      appointmentDate: Appointments.appointmentDate,
+      appointmentTime: Appointments.appointmentTime,
+      durationMinutes: Appointments.durationMinutes,
+      status: Appointments.status,
+      notes: Appointments.notes,
+      createdAt: Appointments.createdAt,
+      updatedAt: Appointments.updatedAt,
+      customer: {
+        id: Customers.id,
+        fullName: Customers.fullName,
+        email: Customers.email,
+        phone: Customers.phone,
+      },
+      vehicle: {
+        id: Vehicles.id,
+        make: Vehicles.make,
+        model: Vehicles.model,
+        year: Vehicles.year,
+        plateNumber: Vehicles.plateNumber,
+      },
+      serviceType: {
+        id: ServiceTypes.id,
+        name: ServiceTypes.name,
+        basePrice: ServiceTypes.basePrice,
+        durationMinutes: ServiceTypes.durationMinutes,
+      },
+    })
+      .from(Appointments)
+      .leftJoin(Customers, eq(Appointments.customerId, Customers.id))
+      .leftJoin(Vehicles, eq(Appointments.vehicleId, Vehicles.id))
+      .leftJoin(ServiceTypes, eq(Appointments.serviceTypeId, ServiceTypes.id))
+      .where(eq(Appointments.id, id));
+
     if (!appointment) {
       return res.status(404).json({ success: false, message: 'Appointment not found' });
     }
@@ -752,6 +794,152 @@ export const checkAvailability = async (req, res, next) => {
     // 5. Check overlapping appointments via existing isSlotAvailable helper
     const available = await isSlotAvailable(date, startTime, duration);
     res.json({ success: true, available });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/v1/appointments/{id}/approve
+ * Customer approves the estimate - transition WAITING_FOR_APPROVAL → IN_PROGRESS
+ * Creates repair tasks from all completed findings
+ */
+export const approveEstimate = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { excludedFindingIds } = req.body; // Array of finding IDs customer doesn't want
+
+    const [appointment] = await Database.select().from(Appointments).where(eq(Appointments.id, id));
+    if (!appointment) {
+      return res.status(404).json({ success: false, message: 'Appointment not found' });
+    }
+
+    if (appointment.status !== 'WAITING_FOR_APPROVAL') {
+      return res.status(400).json({
+        success: false,
+        message: 'Appointment must be in WAITING_FOR_APPROVAL status to approve',
+      });
+    }
+
+    // Update status to IN_PROGRESS
+    const [updated] = await Database.update(Appointments)
+      .set({ status: 'IN_PROGRESS', updatedAt: new Date() })
+      .where(eq(Appointments.id, id))
+      .returning();
+
+    await logStatusChange(id, 'WAITING_FOR_APPROVAL', 'IN_PROGRESS', 'Customer approved the estimate');
+
+    // Mark the ESTIMATE invoice as APPROVED
+    await Database.update(Invoices)
+      .set({ status: 'APPROVED', approvedAt: new Date() })
+      .where(
+        and(
+          eq(Invoices.appointmentId, id),
+          eq(Invoices.invoiceType, 'ESTIMATE'),
+          eq(Invoices.status, 'PENDING_APPROVAL'),
+        ),
+      );
+
+    // Create repair tasks from completed findings that weren't excluded
+    // Each repair task gets a copy of the original inspection finding + products as its own findings
+    const existingTasks = await Database.select()
+      .from(InspectionTasks)
+      .where(eq(InspectionTasks.appointmentId, id));
+
+    const excludedSet = new Set(excludedFindingIds || []);
+    let order = 0;
+    for (const task of existingTasks) {
+      if (task.status !== 'DONE') continue;
+      const findings = await Database.select()
+        .from(InspectionFindings)
+        .where(eq(InspectionFindings.taskId, task.id));
+      for (const finding of findings) {
+        if (excludedSet.has(finding.id)) continue;
+        const repairTaskTitle = `Working on ${finding.description}`;
+        const [repairTask] = await Database.insert(InspectionTasks).values({
+          appointmentId: id,
+          title: repairTaskTitle,
+          status: 'PENDING',
+          order: order++,
+        }).returning();
+
+        // Copy the original finding to the repair task so it shows context
+        const [repairFinding] = await Database.insert(InspectionFindings).values({
+          taskId: repairTask.id,
+          description: `[From inspection] ${finding.description}`,
+        }).returning();
+
+        // Copy the products from the original finding to the repair finding
+        const originalProducts = await Database.select()
+          .from(InspectionFindingProducts)
+          .where(eq(InspectionFindingProducts.findingId, finding.id));
+        if (originalProducts.length > 0) {
+          await Database.insert(InspectionFindingProducts).values(
+            originalProducts.map(p => ({
+              findingId: repairFinding.id,
+              inventoryItemId: p.inventoryItemId,
+              quantity: p.quantity,
+              priceAtTime: p.priceAtTime,
+            }))
+          );
+        }
+      }
+    }
+
+    // Real-time update via WebSocket
+    const io = getIo();
+    io.emit('appointmentChanged', { type: 'statusChanged', appointment: updated });
+    io.emit('taskChanged', { type: 'repairTasksCreated', appointmentId: id });
+
+    res.json({ success: true, data: updated, message: 'Estimate approved. Moving to In Progress.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/v1/appointments/{id}/reject
+ * Customer rejects the estimate - transition WAITING_FOR_APPROVAL → CANCELLED
+ */
+export const rejectEstimate = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ success: false, message: 'Reason is required to reject the estimate' });
+    }
+
+    const [appointment] = await Database.select().from(Appointments).where(eq(Appointments.id, id));
+    if (!appointment) {
+      return res.status(404).json({ success: false, message: 'Appointment not found' });
+    }
+
+    if (appointment.status !== 'WAITING_FOR_APPROVAL') {
+      return res.status(400).json({
+        success: false,
+        message: 'Appointment must be in WAITING_FOR_APPROVAL status to reject',
+      });
+    }
+
+    const notes = `Customer rejected estimate. Reason: ${reason}`;
+    const [updated] = await Database.update(Appointments)
+      .set({ status: 'CANCELLED', notes, updatedAt: new Date() })
+      .where(eq(Appointments.id, id))
+      .returning();
+
+    await logStatusChange(id, 'WAITING_FOR_APPROVAL', 'CANCELLED', notes);
+
+    // Cancel all invoices
+    await Database.update(Invoices)
+      .set({ status: 'CANCELLED', cancelledAt: new Date() })
+      .where(eq(Invoices.appointmentId, id));
+
+    // Real-time update
+    const io = getIo();
+    io.emit('appointmentChanged', { type: 'cancelled', appointment: updated });
+
+    res.json({ success: true, data: updated, message: 'Estimate rejected. Appointment has been cancelled.' });
   } catch (error) {
     next(error);
   }
