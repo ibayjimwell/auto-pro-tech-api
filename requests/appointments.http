@@ -58,3 +58,7 @@ GET http://localhost:4000/api/v1/appointments/6e3bc817-f492-4d9f-a842-28d4399e01
 
 ### Get Tracking Appointments
 GET http://localhost:4000/api/v1/appointments/tracking?status=PENDING
+
+### 
+
+http://localhost:4000/api/v1/appointments/available-slots?date=2026-05-20&serviceTypeId=14580064-4659-4203-be97-2a6e231dfead

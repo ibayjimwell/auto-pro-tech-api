@@ -1,4 +1,4 @@
-import { Database } from '../database/drizzle.js';
+import { Database } from "../database/drizzle.js";
 import {
   Appointments,
   Customers,
@@ -10,42 +10,44 @@ import {
   InspectionFindings,
   InspectionFindingProducts,
   Invoices,
-} from '../models/index.js';
-import { eq, and, sql, lt, gt, gte, lte, desc } from 'drizzle-orm';
-import { getIo } from '../websocket.js';
-import { sendPushNotification } from '../services/push.service.js';
-import { PushTokens } from '../models/index.js';
+} from "../models/index.js";
+import { eq, and, sql, lt, gt, gte, lte, desc, ne } from "drizzle-orm";
+import { getIo } from "../websocket.js";
+import { sendPushNotification } from "../services/push.service.js";
+import { PushTokens } from "../models/index.js";
 
 /**
  * Helper: Check if a time slot overlaps existing appointments on a given date
- * @param {string} date - Date in YYYY-MM-DD format
- * @param {string} startTime - Start time in HH:MM:SS format
- * @param {number} durationMinutes - Duration of the appointment in minutes
- * @param {string} [excludeAppointmentId] - ID of appointment to exclude from check (for updates)
- * @returns {Promise<boolean>} true if slot is available, false if booked
+ * @param {string} date - YYYY-MM-DD
+ * @param {string} startTime - HH:MM:SS
+ * @param {number} durationMinutes
+ * @param {string} [excludeAppointmentId]
+ * @returns {Promise<boolean>}
  */
 async function isSlotAvailable(date, startTime, durationMinutes, excludeAppointmentId = null) {
-  const endTime = new Date(`1970-01-01T${startTime}`);
-  endTime.setMinutes(endTime.getMinutes() + durationMinutes);
-  const endTimeStr = endTime.toTimeString().slice(0, 8);
+  const [hour, minute] = startTime.split(':').map(Number);
+  const startMinutes = hour * 60 + minute;
+  const endMinutes = startMinutes + durationMinutes;
 
-  let query = Database.select()
-    .from(Appointments)
-    .where(eq(Appointments.appointmentDate, date))
-    .where(sql`${Appointments.status} != 'CANCELLED'`);
+  // Use raw SQL to guarantee correct date filtering
+  const result = await Database.execute(sql`
+    SELECT appointment_time, duration_minutes, id
+    FROM appointments
+    WHERE appointment_date = ${date}
+    AND status != 'CANCELLED'
+  `);
+  const existing = result.rows || [];
 
-  if (excludeAppointmentId) {
-    query = query.where(sql`${Appointments.id} != ${excludeAppointmentId}`);
-  }
+  // If we are updating an appointment, exclude the current appointment from the check
+  const filtered = excludeAppointmentId
+    ? existing.filter(row => row.id !== excludeAppointmentId)
+    : existing;
 
-  const existing = await query;
-
-  for (const app of existing) {
-    const appStart = app.appointmentTime;
-    const appEnd = new Date(`1970-01-01T${app.appointmentTime}`);
-    appEnd.setMinutes(appEnd.getMinutes() + app.durationMinutes);
-    const appEndStr = appEnd.toTimeString().slice(0, 8);
-    if (startTime < appEndStr && endTimeStr > appStart) {
+  for (const app of filtered) {
+    const [appHour, appMinute] = app.appointment_time.split(':').map(Number);
+    const appStart = appHour * 60 + appMinute;
+    const appEnd = appStart + app.duration_minutes;
+    if (startMinutes < appEnd && endMinutes > appStart) {
       return false;
     }
   }
@@ -60,7 +62,13 @@ async function isSlotAvailable(date, startTime, durationMinutes, excludeAppointm
  * @param {string} notes - Optional notes about the status change
  * @param {string} changedBy - User ID who made the change (optional)
  */
-async function logStatusChange(appointmentId, previousStatus, newStatus, notes = null, changedBy = null) {
+async function logStatusChange(
+  appointmentId,
+  previousStatus,
+  newStatus,
+  notes = null,
+  changedBy = null,
+) {
   try {
     await Database.insert(AppointmentStatusLogs).values({
       appointmentId,
@@ -70,16 +78,13 @@ async function logStatusChange(appointmentId, previousStatus, newStatus, notes =
       changedBy: changedBy || null,
     });
   } catch (error) {
-    console.error('Failed to log status change:', error);
+    console.error("Failed to log status change:", error);
     // Don't throw - allow appointment update to succeed even if logging fails
   }
 }
 
 /**
  * GET /api/v1/appointments/available-slots
- * Get available time slots for a given date and service type
- * Query params: date (YYYY-MM-DD), serviceTypeId (UUID)
- * Role: all (public)
  */
 export const getAvailableSlots = async (req, res, next) => {
   try {
@@ -88,14 +93,14 @@ export const getAvailableSlots = async (req, res, next) => {
     if (!date || !serviceTypeId) {
       return res.status(400).json({
         success: false,
-        message: 'date and serviceTypeId query parameters are required',
+        message: "date and serviceTypeId are required",
       });
     }
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return res.status(400).json({
         success: false,
-        message: 'date must be in YYYY-MM-DD format',
+        message: "date must be in YYYY-MM-DD format",
       });
     }
 
@@ -106,31 +111,64 @@ export const getAvailableSlots = async (req, res, next) => {
     if (!serviceType) {
       return res.status(404).json({
         success: false,
-        message: 'Service type not found',
+        message: "Service type not found",
       });
     }
 
     if (!serviceType.active) {
       return res.status(400).json({
         success: false,
-        message: 'Service type is not active',
+        message: "Service type is not active",
       });
     }
 
     const duration = serviceType.durationMinutes;
-    const shopOpen = '08:00:00';
-    const shopClose = '17:00:00';
+    const shopOpen = 8 * 60;
+    const shopClose = 17 * 60;
+    const lastStart = shopClose - duration;
+
+    if (lastStart < shopOpen) {
+      return res.json({ success: true, data: [] });
+    }
+
+    // ✅ Use raw SQL to fetch appointments for the exact date
+    const result = await Database.execute(sql`
+      SELECT appointment_time, duration_minutes 
+      FROM appointments 
+      WHERE appointment_date = ${date} 
+      AND status != 'CANCELLED'
+    `);
+
+    const appointmentsOnDate = result.rows || [];
+
+    console.log(
+      `[DEBUG] Found ${appointmentsOnDate.length} appointments for ${date}:`,
+      appointmentsOnDate,
+    );
+
+    const bookedIntervals = appointmentsOnDate.map((app) => {
+      const [hour, minute] = app.appointment_time.split(":").map(Number);
+      const start = hour * 60 + minute;
+      const end = start + app.duration_minutes;
+      return { start, end };
+    });
 
     const slots = [];
-    let current = new Date(`1970-01-01T${shopOpen}`);
-    const endLimit = new Date(`1970-01-01T${shopClose}`);
-    endLimit.setMinutes(endLimit.getMinutes() - duration);
+    for (let minutes = shopOpen; minutes <= lastStart; minutes += 30) {
+      const hour = Math.floor(minutes / 60);
+      const minute = minutes % 60;
+      const timeStr = `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}:00`;
+      const slotStart = minutes;
+      const slotEnd = slotStart + duration;
 
-    while (current <= endLimit) {
-      const timeStr = current.toTimeString().slice(0, 8);
-      const available = await isSlotAvailable(date, timeStr, duration);
+      let available = true;
+      for (const interval of bookedIntervals) {
+        if (slotStart < interval.end && slotEnd > interval.start) {
+          available = false;
+          break;
+        }
+      }
       slots.push({ time: timeStr, available });
-      current.setMinutes(current.getMinutes() + 30);
     }
 
     res.json({ success: true, data: slots });
@@ -155,59 +193,88 @@ export const createAppointment = async (req, res, next) => {
       assignedStaffId,
     } = req.body;
 
-    if (!customerId || !vehicleId || !serviceTypeId || !appointmentDate || !appointmentTime) {
+    if (
+      !customerId ||
+      !vehicleId ||
+      !serviceTypeId ||
+      !appointmentDate ||
+      !appointmentTime
+    ) {
       return res.status(400).json({
         success: false,
-        message: 'customerId, vehicleId, serviceTypeId, appointmentDate, and appointmentTime are required',
+        message:
+          "customerId, vehicleId, serviceTypeId, appointmentDate, and appointmentTime are required",
       });
     }
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(appointmentDate)) {
       return res.status(400).json({
         success: false,
-        message: 'appointmentDate must be in YYYY-MM-DD format',
+        message: "appointmentDate must be in YYYY-MM-DD format",
       });
     }
 
     if (!/^\d{2}:\d{2}:\d{2}$/.test(appointmentTime)) {
       return res.status(400).json({
         success: false,
-        message: 'appointmentTime must be in HH:MM:SS format',
+        message: "appointmentTime must be in HH:MM:SS format",
       });
     }
 
-    const [customer] = await Database.select().from(Customers).where(eq(Customers.id, customerId));
+    const [customer] = await Database.select()
+      .from(Customers)
+      .where(eq(Customers.id, customerId));
     if (!customer) {
-      return res.status(404).json({ success: false, message: 'Customer not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Customer not found" });
     }
 
-    const [vehicle] = await Database.select().from(Vehicles).where(eq(Vehicles.id, vehicleId));
+    const [vehicle] = await Database.select()
+      .from(Vehicles)
+      .where(eq(Vehicles.id, vehicleId));
     if (!vehicle) {
-      return res.status(404).json({ success: false, message: 'Vehicle not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Vehicle not found" });
     }
 
-    const [serviceType] = await Database.select().from(ServiceTypes).where(eq(ServiceTypes.id, serviceTypeId));
+    const [serviceType] = await Database.select()
+      .from(ServiceTypes)
+      .where(eq(ServiceTypes.id, serviceTypeId));
     if (!serviceType) {
-      return res.status(404).json({ success: false, message: 'Service type not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Service type not found" });
     }
     if (!serviceType.active) {
-      return res.status(400).json({ success: false, message: 'Service type is not active' });
+      return res
+        .status(400)
+        .json({ success: false, message: "Service type is not active" });
     }
 
     let staff = null;
     if (assignedStaffId) {
-      [staff] = await Database.select().from(Staff).where(eq(Staff.id, assignedStaffId));
+      [staff] = await Database.select()
+        .from(Staff)
+        .where(eq(Staff.id, assignedStaffId));
       if (!staff) {
-        return res.status(404).json({ success: false, message: 'Staff member not found' });
+        return res
+          .status(404)
+          .json({ success: false, message: "Staff member not found" });
       }
     }
 
     const duration = serviceType.durationMinutes;
-    const available = await isSlotAvailable(appointmentDate, appointmentTime, duration);
+    const available = await isSlotAvailable(
+      appointmentDate,
+      appointmentTime,
+      duration,
+    );
     if (!available) {
       return res.status(409).json({
         success: false,
-        message: 'Time slot is already booked. Please choose another time.',
+        message: "Time slot is already booked. Please choose another time.",
       });
     }
 
@@ -220,16 +287,22 @@ export const createAppointment = async (req, res, next) => {
         appointmentDate,
         appointmentTime,
         durationMinutes: duration,
-        status: 'PENDING',
+        status: "PENDING",
         notes: notes || null,
       })
       .returning();
 
-    await logStatusChange(appointment.id, null, 'PENDING', 'Appointment created', null);
+    await logStatusChange(
+      appointment.id,
+      null,
+      "PENDING",
+      "Appointment created",
+      null,
+    );
 
     // 🔁 Real-time update via WebSocket
     const io = getIo();
-    io.emit('appointmentChanged', { type: 'created', appointment });
+    io.emit("appointmentChanged", { type: "created", appointment });
 
     res.status(201).json({ success: true, data: appointment });
   } catch (error) {
@@ -290,11 +363,17 @@ export const getAppointments = async (req, res, next) => {
 
     // Apply filters
     if (status) {
-      const validStatuses = ['PENDING', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'];
+      const validStatuses = [
+        "PENDING",
+        "CONFIRMED",
+        "IN_PROGRESS",
+        "COMPLETED",
+        "CANCELLED",
+      ];
       if (!validStatuses.includes(status.toUpperCase())) {
         return res.status(400).json({
           success: false,
-          message: `Invalid status. Allowed: ${validStatuses.join(', ')}`,
+          message: `Invalid status. Allowed: ${validStatuses.join(", ")}`,
         });
       }
       query = query.where(eq(Appointments.status, status.toUpperCase()));
@@ -305,25 +384,33 @@ export const getAppointments = async (req, res, next) => {
     }
 
     if (from && to) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(from) ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(to)
+      ) {
         return res.status(400).json({
           success: false,
-          message: 'from and to dates must be in YYYY-MM-DD format',
+          message: "from and to dates must be in YYYY-MM-DD format",
         });
       }
       query = query.where(
-        sql`${Appointments.appointmentDate} BETWEEN ${from} AND ${to}`
+        sql`${Appointments.appointmentDate} BETWEEN ${from} AND ${to}`,
       );
     }
 
     // Get total count (simplified)
-    const [{ count }] = await Database.select({ count: sql`count(*)` }).from(Appointments);
+    const [{ count }] = await Database.select({ count: sql`count(*)` }).from(
+      Appointments,
+    );
     const appointments = await query
       .limit(limitNum)
       .offset(offset)
       .orderBy(desc(Appointments.appointmentDate));
 
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader(
+      "Cache-Control",
+      "no-store, no-cache, must-revalidate, private",
+    );
     res.json({
       success: true,
       data: appointments,
@@ -385,7 +472,9 @@ export const getAppointmentById = async (req, res, next) => {
       .where(eq(Appointments.id, id));
 
     if (!appointment) {
-      return res.status(404).json({ success: false, message: 'Appointment not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Appointment not found" });
     }
     res.json({ success: true, data: appointment });
   } catch (error) {
@@ -400,47 +489,74 @@ export const getAppointmentById = async (req, res, next) => {
 export const updateAppointment = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { appointmentDate, appointmentTime, serviceTypeId, notes, assignedStaffId } = req.body;
+    const {
+      appointmentDate,
+      appointmentTime,
+      serviceTypeId,
+      notes,
+      assignedStaffId,
+    } = req.body;
 
-    const [existing] = await Database.select().from(Appointments).where(eq(Appointments.id, id));
+    const [existing] = await Database.select()
+      .from(Appointments)
+      .where(eq(Appointments.id, id));
     if (!existing) {
-      return res.status(404).json({ success: false, message: 'Appointment not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Appointment not found" });
     }
 
     if (appointmentDate && !/^\d{4}-\d{2}-\d{2}$/.test(appointmentDate)) {
-      return res.status(400).json({ success: false, message: 'Invalid date format' });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid date format" });
     }
     if (appointmentTime && !/^\d{2}:\d{2}:\d{2}$/.test(appointmentTime)) {
-      return res.status(400).json({ success: false, message: 'Invalid time format' });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid time format" });
     }
 
     let duration = existing.durationMinutes;
     if (serviceTypeId && serviceTypeId !== existing.serviceTypeId) {
-      const [newService] = await Database.select().from(ServiceTypes).where(eq(ServiceTypes.id, serviceTypeId));
+      const [newService] = await Database.select()
+        .from(ServiceTypes)
+        .where(eq(ServiceTypes.id, serviceTypeId));
       if (!newService) {
-        return res.status(404).json({ success: false, message: 'Service type not found' });
+        return res
+          .status(404)
+          .json({ success: false, message: "Service type not found" });
       }
       if (!newService.active) {
-        return res.status(400).json({ success: false, message: 'Service type is not active' });
+        return res
+          .status(400)
+          .json({ success: false, message: "Service type is not active" });
       }
       duration = newService.durationMinutes;
     }
 
     if (assignedStaffId) {
-      const [staff] = await Database.select().from(Staff).where(eq(Staff.id, assignedStaffId));
+      const [staff] = await Database.select()
+        .from(Staff)
+        .where(eq(Staff.id, assignedStaffId));
       if (!staff) {
-        return res.status(404).json({ success: false, message: 'Staff member not found' });
+        return res
+          .status(404)
+          .json({ success: false, message: "Staff member not found" });
       }
     }
 
     const newDate = appointmentDate || existing.appointmentDate;
     const newTime = appointmentTime || existing.appointmentTime;
-    if (newDate !== existing.appointmentDate || newTime !== existing.appointmentTime) {
+    if (
+      newDate !== existing.appointmentDate ||
+      newTime !== existing.appointmentTime
+    ) {
       const available = await isSlotAvailable(newDate, newTime, duration, id);
       if (!available) {
         return res.status(409).json({
           success: false,
-          message: 'New time slot conflicts with existing appointment',
+          message: "New time slot conflicts with existing appointment",
         });
       }
     }
@@ -452,8 +568,10 @@ export const updateAppointment = async (req, res, next) => {
       updatedAt: new Date(),
     };
     if (serviceTypeId) updateData.serviceTypeId = serviceTypeId;
-    if (duration !== existing.durationMinutes) updateData.durationMinutes = duration;
-    if (assignedStaffId !== undefined) updateData.assignedStaffId = assignedStaffId || null;
+    if (duration !== existing.durationMinutes)
+      updateData.durationMinutes = duration;
+    if (assignedStaffId !== undefined)
+      updateData.assignedStaffId = assignedStaffId || null;
 
     const [updated] = await Database.update(Appointments)
       .set(updateData)
@@ -462,7 +580,7 @@ export const updateAppointment = async (req, res, next) => {
 
     // 🔁 Real-time update
     const io = getIo();
-    io.emit('appointmentChanged', { type: 'updated', appointment: updated });
+    io.emit("appointmentChanged", { type: "updated", appointment: updated });
 
     res.json({ success: true, data: updated });
   } catch (error) {
@@ -479,27 +597,40 @@ export const cancelAppointment = async (req, res, next) => {
     const { id } = req.params;
     const { notes } = req.body || {};
 
-    const [existing] = await Database.select().from(Appointments).where(eq(Appointments.id, id));
+    const [existing] = await Database.select()
+      .from(Appointments)
+      .where(eq(Appointments.id, id));
     if (!existing) {
-      return res.status(404).json({ success: false, message: 'Appointment not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Appointment not found" });
     }
 
     const [updated] = await Database.update(Appointments)
       .set({
-        status: 'CANCELLED',
+        status: "CANCELLED",
         notes: notes || existing.notes,
         updatedAt: new Date(),
       })
       .where(eq(Appointments.id, id))
       .returning();
 
-    await logStatusChange(id, existing.status, 'CANCELLED', notes || 'Appointment cancelled');
+    await logStatusChange(
+      id,
+      existing.status,
+      "CANCELLED",
+      notes || "Appointment cancelled",
+    );
 
     // 🔁 Real-time update
     const io = getIo();
-    io.emit('appointmentChanged', { type: 'cancelled', appointment: updated });
+    io.emit("appointmentChanged", { type: "cancelled", appointment: updated });
 
-    res.json({ success: true, message: 'Appointment cancelled successfully', data: updated });
+    res.json({
+      success: true,
+      message: "Appointment cancelled successfully",
+      data: updated,
+    });
   } catch (error) {
     next(error);
   }
@@ -515,24 +646,39 @@ export const updateAppointmentStatus = async (req, res, next) => {
     const { status, notes } = req.body;
 
     if (!status) {
-      return res.status(400).json({ success: false, message: 'status is required' });
+      return res
+        .status(400)
+        .json({ success: false, message: "status is required" });
     }
 
-    const allowed = ['PENDING', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'];
+    const allowed = [
+      "PENDING",
+      "CONFIRMED",
+      "IN_PROGRESS",
+      "COMPLETED",
+      "CANCELLED",
+    ];
     if (!allowed.includes(status.toUpperCase())) {
-      return res.status(400).json({ success: false, message: `Invalid status. Allowed: ${allowed.join(', ')}` });
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status. Allowed: ${allowed.join(", ")}`,
+      });
     }
 
-    const [existing] = await Database.select().from(Appointments).where(eq(Appointments.id, id));
+    const [existing] = await Database.select()
+      .from(Appointments)
+      .where(eq(Appointments.id, id));
     if (!existing) {
-      return res.status(404).json({ success: false, message: 'Appointment not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Appointment not found" });
     }
 
     const newStatus = status.toUpperCase();
     const validTransitions = {
-      PENDING: ['CONFIRMED', 'CANCELLED'],
-      CONFIRMED: ['IN_PROGRESS', 'PENDING', 'CANCELLED'],
-      IN_PROGRESS: ['COMPLETED', 'CONFIRMED'],
+      PENDING: ["CONFIRMED", "CANCELLED"],
+      CONFIRMED: ["IN_PROGRESS", "PENDING", "CANCELLED"],
+      IN_PROGRESS: ["COMPLETED", "CONFIRMED"],
       COMPLETED: [],
       CANCELLED: [],
     };
@@ -558,7 +704,7 @@ export const updateAppointmentStatus = async (req, res, next) => {
     // 🔔 Push Notifications – only when status changes to CONFIRMED
     // (Optional: also for CANCELLED, UNDER_INSPECTION, etc.)
     // ----------------------------------------------------------------------
-    if (newStatus === 'CONFIRMED') {
+    if (newStatus === "CONFIRMED") {
       try {
         // Fetch all push tokens for this customer
         const pushTokens = await Database.select()
@@ -566,17 +712,23 @@ export const updateAppointmentStatus = async (req, res, next) => {
           .where(eq(PushTokens.customerId, existing.customerId));
 
         if (pushTokens.length > 0) {
-          const tokenList = pushTokens.map(t => t.token);
+          const tokenList = pushTokens.map((t) => t.token);
           const dateStr = existing.appointmentDate;
           const timeStr = existing.appointmentTime.slice(0, 5); // "HH:MM"
-          const title = 'Appointment Confirmed';
+          const title = "Appointment Confirmed";
           const body = `Your appointment on ${dateStr} at ${timeStr} has been confirmed.`;
           // Use a custom sound if you have one, e.g., 'confirmed.wav'
-          await sendPushNotification(tokenList, title, body, { appointmentId: id }, 'notification_sound.wav');
+          await sendPushNotification(
+            tokenList,
+            title,
+            body,
+            { appointmentId: id },
+            "notification_sound.wav",
+          );
         }
       } catch (pushError) {
         // Log error but do NOT interrupt the main response flow
-        console.error('Push notification failed:', pushError);
+        console.error("Push notification failed:", pushError);
       }
     }
 
@@ -623,7 +775,10 @@ export const updateAppointmentStatus = async (req, res, next) => {
       .where(eq(Appointments.id, id));
 
     const io = getIo();
-    io.emit('appointmentChanged', { type: 'statusChanged', appointment: fullAppointment });
+    io.emit("appointmentChanged", {
+      type: "statusChanged",
+      appointment: fullAppointment,
+    });
 
     res.json({ success: true, data: updated });
   } catch (error) {
@@ -637,9 +792,13 @@ export const updateAppointmentStatus = async (req, res, next) => {
 export const getAppointmentStatusLog = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const [appointment] = await Database.select().from(Appointments).where(eq(Appointments.id, id));
+    const [appointment] = await Database.select()
+      .from(Appointments)
+      .where(eq(Appointments.id, id));
     if (!appointment) {
-      return res.status(404).json({ success: false, message: 'Appointment not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Appointment not found" });
     }
     const statusLogs = await Database.select()
       .from(AppointmentStatusLogs)
@@ -659,20 +818,35 @@ export const getCustomerAppointments = async (req, res, next) => {
     const { customerId } = req.params;
     const { page = 1, limit = 20, status } = req.query;
 
-    const [customer] = await Database.select().from(Customers).where(eq(Customers.id, customerId));
+    const [customer] = await Database.select()
+      .from(Customers)
+      .where(eq(Customers.id, customerId));
     if (!customer) {
-      return res.status(404).json({ success: false, message: 'Customer not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Customer not found" });
     }
 
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
     const offset = (pageNum - 1) * limitNum;
 
-    let query = Database.select().from(Appointments).where(eq(Appointments.customerId, customerId));
+    let query = Database.select()
+      .from(Appointments)
+      .where(eq(Appointments.customerId, customerId));
     if (status) {
-      const validStatuses = ['PENDING', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'];
+      const validStatuses = [
+        "PENDING",
+        "CONFIRMED",
+        "IN_PROGRESS",
+        "COMPLETED",
+        "CANCELLED",
+      ];
       if (!validStatuses.includes(status.toUpperCase())) {
-        return res.status(400).json({ success: false, message: `Invalid status. Allowed: ${validStatuses.join(', ')}` });
+        return res.status(400).json({
+          success: false,
+          message: `Invalid status. Allowed: ${validStatuses.join(", ")}`,
+        });
       }
       query = query.where(eq(Appointments.status, status.toUpperCase()));
     }
@@ -709,7 +883,7 @@ export const getCalendarView = async (req, res, next) => {
     const { month } = req.query;
     let startDate, endDate;
     if (month && /^\d{4}-\d{2}$/.test(month)) {
-      const [year, monthNum] = month.split('-').map(Number);
+      const [year, monthNum] = month.split("-").map(Number);
       startDate = new Date(year, monthNum - 1, 1);
       endDate = new Date(year, monthNum, 0);
     } else {
@@ -718,12 +892,14 @@ export const getCalendarView = async (req, res, next) => {
       endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0);
     }
 
-    const startStr = startDate.toISOString().split('T')[0];
-    const endStr = endDate.toISOString().split('T')[0];
+    const startStr = startDate.toISOString().split("T")[0];
+    const endStr = endDate.toISOString().split("T")[0];
 
     const appointments = await Database.select()
       .from(Appointments)
-      .where(sql`${Appointments.appointmentDate} BETWEEN ${startStr} AND ${endStr}`)
+      .where(
+        sql`${Appointments.appointmentDate} BETWEEN ${startStr} AND ${endStr}`,
+      )
       .where(sql`${Appointments.status} != 'CANCELLED'`)
       .orderBy(Appointments.appointmentDate, Appointments.appointmentTime);
 
@@ -753,7 +929,9 @@ export const checkAvailability = async (req, res, next) => {
   try {
     const { date, startTime, serviceTypeId } = req.body;
     if (!date || !startTime || !serviceTypeId) {
-      return res.status(400).json({ success: false, message: 'Missing required fields' });
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing required fields" });
     }
 
     // 1. Service type existence
@@ -761,21 +939,25 @@ export const checkAvailability = async (req, res, next) => {
       .from(ServiceTypes)
       .where(eq(ServiceTypes.id, serviceTypeId));
     if (!serviceType) {
-      return res.status(404).json({ success: false, message: 'Service type not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Service type not found" });
     }
     if (!serviceType.active) {
-      return res.status(400).json({ success: false, message: 'Service type is not active' });
+      return res
+        .status(400)
+        .json({ success: false, message: "Service type is not active" });
     }
 
     const duration = serviceType.durationMinutes;
 
     // 2. Parse time
-    const [hour, minute, second] = startTime.split(':').map(Number);
+    const [hour, minute, second] = startTime.split(":").map(Number);
     const slotTime = new Date();
     slotTime.setHours(hour, minute, second || 0);
 
     // 3. Check if the time is in the past (for today only)
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = new Date().toISOString().split("T")[0];
     if (date === todayStr) {
       const now = new Date();
       if (slotTime < now) {
@@ -784,8 +966,8 @@ export const checkAvailability = async (req, res, next) => {
     }
 
     // 4. Check shop hours: service must start between 08:00 and 17:00 - duration
-    const shopOpen = 8 * 60;           // 08:00 in minutes
-    const shopClose = 17 * 60;         // 17:00 in minutes
+    const shopOpen = 8 * 60; // 08:00 in minutes
+    const shopClose = 17 * 60; // 17:00 in minutes
     const totalMinutes = hour * 60 + minute;
     if (totalMinutes < shopOpen || totalMinutes + duration > shopClose) {
       return res.json({ success: true, available: false });
@@ -809,34 +991,44 @@ export const approveEstimate = async (req, res, next) => {
     const { id } = req.params;
     const { excludedFindingIds } = req.body; // Array of finding IDs customer doesn't want
 
-    const [appointment] = await Database.select().from(Appointments).where(eq(Appointments.id, id));
+    const [appointment] = await Database.select()
+      .from(Appointments)
+      .where(eq(Appointments.id, id));
     if (!appointment) {
-      return res.status(404).json({ success: false, message: 'Appointment not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Appointment not found" });
     }
 
-    if (appointment.status !== 'WAITING_FOR_APPROVAL') {
+    if (appointment.status !== "WAITING_FOR_APPROVAL") {
       return res.status(400).json({
         success: false,
-        message: 'Appointment must be in WAITING_FOR_APPROVAL status to approve',
+        message:
+          "Appointment must be in WAITING_FOR_APPROVAL status to approve",
       });
     }
 
     // Update status to IN_PROGRESS
     const [updated] = await Database.update(Appointments)
-      .set({ status: 'IN_PROGRESS', updatedAt: new Date() })
+      .set({ status: "IN_PROGRESS", updatedAt: new Date() })
       .where(eq(Appointments.id, id))
       .returning();
 
-    await logStatusChange(id, 'WAITING_FOR_APPROVAL', 'IN_PROGRESS', 'Customer approved the estimate');
+    await logStatusChange(
+      id,
+      "WAITING_FOR_APPROVAL",
+      "IN_PROGRESS",
+      "Customer approved the estimate",
+    );
 
     // Mark the ESTIMATE invoice as APPROVED
     await Database.update(Invoices)
-      .set({ status: 'APPROVED', approvedAt: new Date() })
+      .set({ status: "APPROVED", approvedAt: new Date() })
       .where(
         and(
           eq(Invoices.appointmentId, id),
-          eq(Invoices.invoiceType, 'ESTIMATE'),
-          eq(Invoices.status, 'PENDING_APPROVAL'),
+          eq(Invoices.invoiceType, "ESTIMATE"),
+          eq(Invoices.status, "PENDING_APPROVAL"),
         ),
       );
 
@@ -849,25 +1041,29 @@ export const approveEstimate = async (req, res, next) => {
     const excludedSet = new Set(excludedFindingIds || []);
     let order = 0;
     for (const task of existingTasks) {
-      if (task.status !== 'DONE') continue;
+      if (task.status !== "DONE") continue;
       const findings = await Database.select()
         .from(InspectionFindings)
         .where(eq(InspectionFindings.taskId, task.id));
       for (const finding of findings) {
         if (excludedSet.has(finding.id)) continue;
         const repairTaskTitle = `Working on ${finding.description}`;
-        const [repairTask] = await Database.insert(InspectionTasks).values({
-          appointmentId: id,
-          title: repairTaskTitle,
-          status: 'PENDING',
-          order: order++,
-        }).returning();
+        const [repairTask] = await Database.insert(InspectionTasks)
+          .values({
+            appointmentId: id,
+            title: repairTaskTitle,
+            status: "PENDING",
+            order: order++,
+          })
+          .returning();
 
         // Copy the original finding to the repair task so it shows context
-        const [repairFinding] = await Database.insert(InspectionFindings).values({
-          taskId: repairTask.id,
-          description: `[From inspection] ${finding.description}`,
-        }).returning();
+        const [repairFinding] = await Database.insert(InspectionFindings)
+          .values({
+            taskId: repairTask.id,
+            description: `[From inspection] ${finding.description}`,
+          })
+          .returning();
 
         // Copy the products from the original finding to the repair finding
         const originalProducts = await Database.select()
@@ -875,12 +1071,12 @@ export const approveEstimate = async (req, res, next) => {
           .where(eq(InspectionFindingProducts.findingId, finding.id));
         if (originalProducts.length > 0) {
           await Database.insert(InspectionFindingProducts).values(
-            originalProducts.map(p => ({
+            originalProducts.map((p) => ({
               findingId: repairFinding.id,
               inventoryItemId: p.inventoryItemId,
               quantity: p.quantity,
               priceAtTime: p.priceAtTime,
-            }))
+            })),
           );
         }
       }
@@ -888,10 +1084,17 @@ export const approveEstimate = async (req, res, next) => {
 
     // Real-time update via WebSocket
     const io = getIo();
-    io.emit('appointmentChanged', { type: 'statusChanged', appointment: updated });
-    io.emit('taskChanged', { type: 'repairTasksCreated', appointmentId: id });
+    io.emit("appointmentChanged", {
+      type: "statusChanged",
+      appointment: updated,
+    });
+    io.emit("taskChanged", { type: "repairTasksCreated", appointmentId: id });
 
-    res.json({ success: true, data: updated, message: 'Estimate approved. Moving to In Progress.' });
+    res.json({
+      success: true,
+      data: updated,
+      message: "Estimate approved. Moving to In Progress.",
+    });
   } catch (error) {
     next(error);
   }
@@ -907,39 +1110,50 @@ export const rejectEstimate = async (req, res, next) => {
     const { reason } = req.body;
 
     if (!reason || !reason.trim()) {
-      return res.status(400).json({ success: false, message: 'Reason is required to reject the estimate' });
-    }
-
-    const [appointment] = await Database.select().from(Appointments).where(eq(Appointments.id, id));
-    if (!appointment) {
-      return res.status(404).json({ success: false, message: 'Appointment not found' });
-    }
-
-    if (appointment.status !== 'WAITING_FOR_APPROVAL') {
       return res.status(400).json({
         success: false,
-        message: 'Appointment must be in WAITING_FOR_APPROVAL status to reject',
+        message: "Reason is required to reject the estimate",
+      });
+    }
+
+    const [appointment] = await Database.select()
+      .from(Appointments)
+      .where(eq(Appointments.id, id));
+    if (!appointment) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Appointment not found" });
+    }
+
+    if (appointment.status !== "WAITING_FOR_APPROVAL") {
+      return res.status(400).json({
+        success: false,
+        message: "Appointment must be in WAITING_FOR_APPROVAL status to reject",
       });
     }
 
     const notes = `Customer rejected estimate. Reason: ${reason}`;
     const [updated] = await Database.update(Appointments)
-      .set({ status: 'CANCELLED', notes, updatedAt: new Date() })
+      .set({ status: "CANCELLED", notes, updatedAt: new Date() })
       .where(eq(Appointments.id, id))
       .returning();
 
-    await logStatusChange(id, 'WAITING_FOR_APPROVAL', 'CANCELLED', notes);
+    await logStatusChange(id, "WAITING_FOR_APPROVAL", "CANCELLED", notes);
 
     // Cancel all invoices
     await Database.update(Invoices)
-      .set({ status: 'CANCELLED', cancelledAt: new Date() })
+      .set({ status: "CANCELLED", cancelledAt: new Date() })
       .where(eq(Invoices.appointmentId, id));
 
     // Real-time update
     const io = getIo();
-    io.emit('appointmentChanged', { type: 'cancelled', appointment: updated });
+    io.emit("appointmentChanged", { type: "cancelled", appointment: updated });
 
-    res.json({ success: true, data: updated, message: 'Estimate rejected. Appointment has been cancelled.' });
+    res.json({
+      success: true,
+      data: updated,
+      message: "Estimate rejected. Appointment has been cancelled.",
+    });
   } catch (error) {
     next(error);
   }
