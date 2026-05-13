@@ -7,5 +7,5 @@ export const AppointmentStatusEnum = pgEnum('appointment_status', [
   'IN_PROGRESS',
   'COMPLETED',
   'CANCELLED',
-  'CONFIRMED' // legacy compatibility
+  'CONFIRMED' 
 ]);

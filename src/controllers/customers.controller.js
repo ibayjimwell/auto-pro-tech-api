@@ -1,6 +1,6 @@
 import { Database } from '../database/drizzle.js';
-import { Customers } from '../models/index.js';
-import { eq, ilike, or } from 'drizzle-orm';
+import { Customers, Vehicles, Appointments } from '../models/index.js';
+import { eq, ilike, or, sql, desc } from 'drizzle-orm';
 import bcrypt from 'bcrypt'; // for production
 
 export const createCustomer = async (req, res, next) => {
@@ -140,6 +140,88 @@ export const updateCustomer = async (req, res, next) => {
       success: true,
       message: 'Customer updated',
       data: customerWithoutPassword,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/v1/customers/:id/stats
+ * Returns:
+ *   - vehicleCount: total vehicles owned by customer
+ *   - visitCount: appointments excluding PENDING, CANCELLED, CONFIRMED
+ *   - recentCompleted: last 5 COMPLETED appointments with service type & vehicle info
+ */
+export const getCustomerStats = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    // Verify customer exists
+    const [customer] = await Database.select()
+      .from(Customers)
+      .where(eq(Customers.id, id));
+    if (!customer) {
+      return res.status(404).json({
+        success: false,
+        type: 'W-NotFound',
+        message: 'Customer not found',
+      });
+    }
+
+    // --- Vehicle count ---
+    const vehicles = await Database.select()
+      .from(Vehicles)
+      .where(eq(Vehicles.customerId, id));
+    const vehicleCount = vehicles.length;
+
+    // --- Visit count (exclude PENDING, CANCELLED, CONFIRMED) ---
+    const visitStatuses = ['UNDER_INSPECTION', 'WAITING_FOR_APPROVAL', 'IN_PROGRESS', 'COMPLETED'];
+    const allAppointments = await Database.select()
+      .from(Appointments)
+      .where(eq(Appointments.customerId, id));
+    const visits = allAppointments.filter(apt => visitStatuses.includes(apt.status));
+    const visitCount = visits.length;
+
+    // --- Recent completed (last 5, joined with service type & vehicle) ---
+    const completedAppointments = await Database.select({
+      id: Appointments.id,
+      appointmentDate: Appointments.appointmentDate,
+      appointmentTime: Appointments.appointmentTime,
+      status: Appointments.status,
+      serviceType: {
+        id: sql`service_types.id`,
+        name: sql`service_types.name`,
+        basePrice: sql`service_types.base_price`,
+      },
+      vehicle: {
+        make: sql`vehicles.make`,
+        model: sql`vehicles.model`,
+        plateNumber: sql`vehicles.plate_number`,
+      },
+    })
+      .from(Appointments)
+      .leftJoin(
+        sql`service_types`,
+        sql`service_types.id = ${Appointments.serviceTypeId}`
+      )
+      .leftJoin(
+        sql`vehicles`,
+        sql`vehicles.id = ${Appointments.vehicleId}`
+      )
+      .where(
+        sql`${Appointments.customerId} = ${id} AND ${Appointments.status} = 'COMPLETED'`
+      )
+      .orderBy(desc(Appointments.appointmentDate))
+      .limit(5);
+
+    res.json({
+      success: true,
+      data: {
+        vehicleCount,
+        visitCount,
+        recentCompleted: completedAppointments,
+      },
     });
   } catch (error) {
     next(error);
