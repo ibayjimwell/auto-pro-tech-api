@@ -6,10 +6,12 @@ import {
   updateServiceType,
   deleteServiceType,
   permanentDeleteServiceType,
+  getTrendingServiceTypes,
 } from '../controllers/service-types.controller.js';
 
 const serviceTypesRouter = Router();
 
+serviceTypesRouter.get('/trending', getTrendingServiceTypes);
 serviceTypesRouter.get('/', getServiceTypesWithFilter); // now accepts ?active=true/false
 serviceTypesRouter.post('/', createServiceType);
 serviceTypesRouter.get('/:id', getServiceTypeById);

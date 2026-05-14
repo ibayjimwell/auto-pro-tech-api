@@ -1,6 +1,6 @@
 import { Database } from '../database/drizzle.js';
-import { ServiceTypes } from '../models/index.js';
-import { eq } from 'drizzle-orm';
+import { ServiceTypes, Appointments } from '../models/index.js';
+import { eq, sql, desc } from 'drizzle-orm';
 
 /**
  * GET /api/v1/service-types
@@ -245,6 +245,41 @@ export const permanentDeleteServiceType = async (req, res, next) => {
     
     await Database.delete(ServiceTypes).where(eq(ServiceTypes.id, id));
     res.json({ success: true, message: 'Service type permanently deleted' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/v1/service-types/trending
+ * Returns top 4 most booked service types (by appointment count across all statuses)
+ * Role: all (public)
+ */
+export const getTrendingServiceTypes = async (req, res, next) => {
+  try {
+    const result = await Database.execute(sql`
+      SELECT 
+        st.id,
+        st.name,
+        st.description,
+        st.base_price AS "basePrice",
+        st.duration_minutes AS "durationMinutes",
+        st.active,
+        COUNT(a.id)::int AS "appointmentCount"
+      FROM service_types st
+      LEFT JOIN appointments a ON a.service_type_id = st.id
+      WHERE st.active = true
+      GROUP BY st.id
+      ORDER BY "appointmentCount" DESC, st.name ASC
+      LIMIT 4
+    `);
+
+    const trending = result.rows || [];
+
+    res.json({
+      success: true,
+      data: trending,
+    });
   } catch (error) {
     next(error);
   }
