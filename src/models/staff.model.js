@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, boolean, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, boolean, timestamp, jsonb, index } from 'drizzle-orm/pg-core';
 
 export const Staff = pgTable('staff', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -9,6 +9,7 @@ export const Staff = pgTable('staff', {
   active: boolean('active').default(true).notNull(),
   tempPassword: boolean('temp_password').default(false),
   tempExpiresAt: timestamp('temp_expires_at'),
+  permissions: jsonb('permissions').default([]),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (table) => ({
   usernameIdx: index('staff_username_idx').on(table.username),

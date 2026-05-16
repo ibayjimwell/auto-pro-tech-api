@@ -209,6 +209,7 @@ export const staffLogin = async (req, res, next) => {
         fullName: staff.fullName,
         username: staff.username,
         role: staff.role,
+        permissions: staff.permissions || [],
       },
     });
   } catch (error) {

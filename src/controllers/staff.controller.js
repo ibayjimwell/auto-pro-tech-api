@@ -5,7 +5,7 @@ import bcrypt from "bcrypt";
 
 export const createStaff = async (req, res, next) => {
   try {
-    const { fullName, username, role, active } = req.body; // password removed
+    const { fullName, username, role, permissions, active } = req.body;
 
     // Check if staff already exists by username
     const [existing] = await Database.select()
@@ -40,6 +40,7 @@ export const createStaff = async (req, res, next) => {
         tempPassword: true,
         tempExpiresAt: expiresAt,
         role: role || null,
+        permissions: Array.isArray(permissions) ? permissions : [],
         active: active !== undefined ? active : true,
       })
       .returning();
@@ -110,7 +111,7 @@ export const getStaffById = async (req, res, next) => {
 export const updateStaff = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { fullName, username, password, role, active } = req.body;
+    const { fullName, username, password, role, permissions, active } = req.body;
 
     const [existingStaff] = await Database.select()
       .from(Staff)
@@ -148,6 +149,7 @@ export const updateStaff = async (req, res, next) => {
         username: username || existingStaff.username,
         password: updatedPassword,
         role: role !== undefined ? role : existingStaff.role,
+        permissions: permissions !== undefined ? permissions : existingStaff.permissions,
         active: active !== undefined ? active : existingStaff.active,
       })
       .where(eq(Staff.id, id))
