@@ -3,11 +3,23 @@ import { Staff } from "../models/index.js";
 import { eq, ilike, or } from "drizzle-orm";
 import bcrypt from "bcrypt"; 
 
+// Helper to ensure permissions are always an array
+const parsePermissions = (staff) => {
+  let perms = staff.permissions;
+  if (typeof perms === 'string') {
+    try {
+      perms = JSON.parse(perms);
+    } catch (e) {
+      perms = [];
+    }
+  }
+  return Array.isArray(perms) ? perms : [];
+};
+
 export const createStaff = async (req, res, next) => {
   try {
     const { fullName, username, role, permissions, active } = req.body;
 
-    // Check if staff already exists by username
     const [existing] = await Database.select()
       .from(Staff)
       .where(eq(Staff.username, username));
@@ -25,12 +37,14 @@ export const createStaff = async (req, res, next) => {
       });
     }
 
-    // Generate a random temporary password (e.g., temp@1234)
     const tempNum = Math.floor(1000 + Math.random() * 9000);
     const tempPassword = `temp@${tempNum}`;
     const hashedPassword = await bcrypt.hash(tempPassword, 10);
     const expiresAt = new Date();
-    expiresAt.setHours(expiresAt.getHours() + 24); // valid for 24 hours
+    expiresAt.setHours(expiresAt.getHours() + 24);
+
+    // Convert permissions array to JSON string for storage
+    const permissionsJson = JSON.stringify(Array.isArray(permissions) ? permissions : []);
 
     const [staff] = await Database.insert(Staff)
       .values({
@@ -40,18 +54,17 @@ export const createStaff = async (req, res, next) => {
         tempPassword: true,
         tempExpiresAt: expiresAt,
         role: role || null,
-        permissions: Array.isArray(permissions) ? permissions : [],
+        permissions: permissionsJson,
         active: active !== undefined ? active : true,
       })
       .returning();
 
-    // Remove password from response, but include the plain temp password
     const { password: _, ...staffWithoutPassword } = staff;
     res.status(201).json({
       success: true,
       message: "Staff created with temporary password",
-      data: staffWithoutPassword,
-      tempPassword,  // <-- send the plain temporary password
+      data: { ...staffWithoutPassword, permissions: Array.isArray(permissions) ? permissions : [] },
+      tempPassword,
     });
   } catch (error) {
     next(error);
@@ -77,8 +90,11 @@ export const getStaff = async (req, res, next) => {
     }
 
     const staffList = await query;
-    // Remove passwords from each staff object
-    const staffWithoutPasswords = staffList.map(({ password, ...staff }) => staff);
+    const staffWithParsed = staffList.map(s => ({
+      ...s,
+      permissions: parsePermissions(s),
+    }));
+    const staffWithoutPasswords = staffWithParsed.map(({ password, ...staff }) => staff);
     res.json({
       success: true,
       data: staffWithoutPasswords,
@@ -98,10 +114,10 @@ export const getStaffById = async (req, res, next) => {
         message: "Staff not found",
       });
     }
-    const { password, ...staffWithoutPassword } = staff;
+    const { password, ...rest } = staff;
     res.json({
       success: true,
-      data: staffWithoutPassword,
+      data: { ...rest, permissions: parsePermissions(staff) },
     });
   } catch (error) {
     next(error);
@@ -123,7 +139,6 @@ export const updateStaff = async (req, res, next) => {
       });
     }
 
-    // Check username uniqueness if changed
     if (username && username !== existingStaff.username) {
       const [usernameExisting] = await Database.select()
         .from(Staff)
@@ -138,9 +153,13 @@ export const updateStaff = async (req, res, next) => {
 
     let updatedPassword = existingStaff.password;
     if (password) {
-      // Hash new password
       updatedPassword = await bcrypt.hash(password, 10);
-      
+    }
+
+    // Convert permissions to JSON string if provided
+    let permsToStore = existingStaff.permissions;
+    if (permissions !== undefined) {
+      permsToStore = JSON.stringify(Array.isArray(permissions) ? permissions : []);
     }
 
     const [staff] = await Database.update(Staff)
@@ -149,7 +168,7 @@ export const updateStaff = async (req, res, next) => {
         username: username || existingStaff.username,
         password: updatedPassword,
         role: role !== undefined ? role : existingStaff.role,
-        permissions: permissions !== undefined ? permissions : existingStaff.permissions,
+        permissions: permsToStore,
         active: active !== undefined ? active : existingStaff.active,
       })
       .where(eq(Staff.id, id))
@@ -159,7 +178,7 @@ export const updateStaff = async (req, res, next) => {
     res.json({
       success: true,
       message: "Staff updated",
-      data: staffWithoutPassword,
+      data: { ...staffWithoutPassword, permissions: Array.isArray(permissions) ? permissions : parsePermissions(existingStaff) },
     });
   } catch (error) {
     next(error);

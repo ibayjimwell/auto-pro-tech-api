@@ -1,5 +1,5 @@
 import { Database } from '../database/drizzle.js';
-import { Customers } from '../models/index.js';
+import { Customers, Staff } from '../models/index.js';
 import { eq, or } from 'drizzle-orm';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
@@ -184,6 +184,17 @@ export const staffLogin = async (req, res, next) => {
       });
     }
 
+    // --- FIX: Parse permissions if it's a string ---
+    let permissions = staff.permissions;
+    if (typeof permissions === 'string') {
+      try {
+        permissions = JSON.parse(permissions);
+      } catch (e) {
+        permissions = [];
+      }
+    }
+    if (!Array.isArray(permissions)) permissions = [];
+
     // Check if temporary password is active
     let needsReset = false;
     let resetToken = null;
@@ -209,7 +220,7 @@ export const staffLogin = async (req, res, next) => {
         fullName: staff.fullName,
         username: staff.username,
         role: staff.role,
-        permissions: staff.permissions || [],
+        permissions: permissions,
       },
     });
   } catch (error) {
